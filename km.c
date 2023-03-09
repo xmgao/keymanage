@@ -17,7 +17,7 @@
 #include <dirent.h>
 #include<arpa/inet.h>
 #include<math.h>
-#include <openssl/sha.h>
+
 
 
 
