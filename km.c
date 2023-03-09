@@ -161,6 +161,7 @@ bool key_index_sync() {
 
 	return false;
 }
+//test1
 
 //更新密钥池，更新删除密钥索引
 void renewkey() {
