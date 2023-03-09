@@ -21,37 +21,37 @@
 
 
 
-//  ï¿½ï¿½ï¿½ï¿½: gcc km.c -o km -g -pthread -lcrypto
-// ./km hostname
+//  ±àÒë: gcc km.c -o km -g -pthread -lcrypto
+//ÔËĞĞ ./km remoteip
 
 //#define max(a,b) 
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
-#define  MAXS 1024  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-#define  BUFFLEN 1024 //bufï¿½ï¿½Ğ¡
-#define  DF_SERV_PORT 50000 //Ä¬ï¿½Ï·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿ï¿½
-#define  MAX_KEYFILE_SIZE  4096000  //ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ä¼ï¿½ï¿½ï¿½Ğ¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-#define  KEY_CREATE_RATE  1280  //ï¿½ï¿½Ô¿Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½É³ï¿½ï¿½ï¿½
-#define  KEY_UNIT_SIZE    4   //ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½æ´¢ï¿½ï¿½Î»4ï¿½Ö½ï¿½
-#define  KEY_RATIO       100    //SAï¿½ï¿½Ô¿ï¿½ï¿½á»°ï¿½ï¿½Ô¿ï¿½Ä±ï¿½Öµ
-#define  KEY_FILE   "/home/keyfile.kf"   //ï¿½ï¿½Ô¿ï¿½Ä¼ï¿½
-#define  TEMPKEY_FILE   "/home/tempkeyfile.kf"   //ï¿½ï¿½Ô¿ï¿½Ä¼ï¿½
-#define  REMOTE_IPADDR "127.0.0.1"   //ï¿½Ô·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ipï¿½ï¿½Ö·
-#define  INIT_KEYD   10000 //ï¿½ï¿½Ê¼ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-#define  up_index  2  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-#define  down_index  0.1  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-#define  Th1  0.7   //ï¿½Ï½ï¿½
-#define  Th2  0.3	//ï¿½Â½ï¿½
+#define  MAXS 1024  //×î´ó¼àÌıÊıÁ¿
+#define  BUFFLEN 1024 //buf´óĞ¡
+#define  DF_SERV_PORT 50000 //Ä¬ÈÏ·şÎñÆ÷¼àÌı¶Ë¿Ú
+#define  MAX_KEYFILE_SIZE  4096000  //×î´óÃÜÔ¿ÎÄ¼ş´óĞ¡£¬µ±ÃÜÔ¿ÎÄ¼ş´óÓÚ×î´óÏŞÖÆÊ±£¬²»ÔÙÌî³äÃÜÔ¿
+#define  KEY_CREATE_RATE  1280  //ÃÜÔ¿Ã¿ÃëÉú³É³¤¶È
+#define  KEY_UNIT_SIZE    4   //ÃÜÔ¿»ù±¾´æ´¢µ¥Î»4×Ö½Ú
+#define  KEY_RATIO       100    //SAÃÜÔ¿Óë»á»°ÃÜÔ¿µÄ±ÈÖµ
+#define  KEY_FILE   "/home/keyfile.kf"   //ÃÜÔ¿ÎÄ¼ş
+#define  TEMPKEY_FILE   "/home/tempkeyfile.kf"   //ÃÜÔ¿ÎÄ¼ş
+#define  REMOTE_IPADDR "127.0.0.1"   //¶Ô·½·şÎñÆ÷µÄipµØÖ·
+#define  INIT_KEYD   10000 //³õÊ¼ÃÜÔ¿ÅÉÉú²ÎÊı
+#define  up_index  2  //ÅÉÉúÔö³¤Òò×Ó
+#define  down_index  0.1  //ÅÉÉú¼õÉÙÒò×Ó
+#define  Th1  0.7   //ÉÏ½ç
+#define  Th2  0.3	//ÏÂ½ç
 
 pthread_rwlock_t keywr;
-bool key_sync_flag, skey_sync_flag;  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿Í¬ï¿½ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ú¹ï¿½Ó¦saĞ­ï¿½Ì£ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ú¼ï¿½ï¿½ÜµÄ»á»°ï¿½ï¿½Ô¿
-int delkeyindex, keyindex, sekeyindex, sdkeyindex;  //ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½Ê¶ï¿½ï¿½Ç°ï¿½ï¿½saï¿½ï¿½Ô¿,ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-int encrypt_flag, decrypt_flag;  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ô¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ä¶ï¿½Ó¦ï¿½ï¿½Ïµï¿½ï¿½0ï¿½ï¿½Ê¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½1ï¿½ï¿½Ê¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-int SERV_PORT;  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿ï¿½
-int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;   //ï¿½ï¿½Â¼ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-int ekey_sindex, dkey_sindex;   //ï¿½ï¿½Â¼Ò»ï¿½ï¿½ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿syn==1ï¿½ï¿½ï¿½ï¿½ï¿½İ°ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½
-char  raw_ekey[64], raw_dkey[64], raw_olddkey[64], prived_dkey[64], prived_ekey[64];  //ï¿½ï¿½Â¼Ô­Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-char remote_ip[32];  //ï¿½ï¿½Â¼Ô¶ï¿½ï¿½ipï¿½ï¿½Ö·
+bool key_sync_flag, skey_sync_flag;  //Á½ÖÖÃÜÔ¿Í¬²½±êÖ¾£¬Ò»ÖÖÓÃÓÚ¹©Ó¦saĞ­ÉÌ£¬Ò»ÖÖÓÃÓÚ¼ÓÃÜµÄ»á»°ÃÜÔ¿
+int delkeyindex, keyindex, sekeyindex, sdkeyindex;  //ÃÜÔ¿Ë÷Òı£¬ÓÃÓÚÉ¾³ı¹ıÆÚÃÜÔ¿£¬±êÊ¶µ±Ç°µÄsaÃÜÔ¿,¼ÓÃÜÃÜÔ¿£¬½âÃÜÃÜÔ¿
+int encrypt_flag, decrypt_flag;  //¼ÓÃÜÃÜÔ¿ÒÔ¼°½âÃÜÃÜÔ¿µÄ¶ÔÓ¦¹ØÏµ£¬0±êÊ¶¼ÓÃÜÃÜÔ¿£¬1±êÊ¶½âÃÜÃÜÔ¿
+int SERV_PORT;  //·şÎñÆ÷¼àÌı¶Ë¿Ú
+int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;   //¼ÇÂ¼µ±Ç°µÄÃÜÔ¿ÅÉÉú²ÎÊıºÍÏÂÒ»¸öÃÜÔ¿ÅÉÉú²ÎÊı
+int ekey_sindex, dkey_sindex;   //¼ÇÂ¼Ò»¸ö¼Ó½âÃÜÃÜÔ¿syn==1µÄÊı¾İ°ü¶ÔÓ¦µÄÃÜÔ¿Ë÷Òı
+char  raw_ekey[64], raw_dkey[64], raw_olddkey[64], prived_dkey[64], prived_ekey[64];  //¼ÇÂ¼Ô­Ê¼Á¿×ÓÃÜÔ¿ºÍÅÉÉúÃÜÔ¿
+char remote_ip[32];  //¼ÇÂ¼Ô¶³ÌipµØÖ·
 
 struct s_info {
 	struct sockaddr_in  addr;
@@ -105,15 +105,15 @@ void do_crecon(int fd, int epfd) {
 	int ar = accept(fd, (struct sockaddr_in*)&cli_addr, &client_addr_size);
 	printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)),
 		ntohs(cli_addr.sin_port));
-	//ï¿½ï¿½ï¿½ï¿½ar socketï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	//ÉèÖÃar socket·Ç×èÈû
 	int flag = fcntl(ar, F_GETFL);
 	flag |= O_NONBLOCK;
 	fcntl(ar, F_SETFL, flag);
-	//ï¿½Â¼ï¿½ï¿½ï¿½Öµ
+	//ÊÂ¼ş¸³Öµ
 	tep.events = EPOLLIN | EPOLLET;
 	tep.data.fd = ar;
 
-	//ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½
+	//ÊÂ¼şÉÏÊ÷
 	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, ar, &tep);
 	if (ret == -1) {
 		perror("epoll_ctl_add error!\n");
@@ -122,7 +122,7 @@ void do_crecon(int fd, int epfd) {
 }
 
 
-//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 
+//·¢ÆğÁ¬½Ó 
 void con_serv(int* fd, const char* src, int port) {
 	int  ret, cr;
 	struct sockaddr_in serv_addr, cli_addr;
@@ -133,26 +133,26 @@ void con_serv(int* fd, const char* src, int port) {
 	serv_addr.sin_port = htons(SERV_PORT);
 	inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
 
-	cr = connect(*fd, &serv_addr, sizeof(serv_addr)); //ï¿½ï¿½ï¿½Ó¶Ô·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	cr = connect(*fd, &serv_addr, sizeof(serv_addr)); //Á¬½Ó¶Ô·½·şÎñÆ÷
 	if (cr < 0) {
 		perror("key_sync connect error!\n");
 		return false;
 	}
 }
-//ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½Ó¦ï¿½ï¿½ÏµÍ¬ï¿½ï¿½
+//¼Ó½âÃÜÃÜÔ¿¶ÔÓ¦¹ØÏµÍ¬²½
 bool key_index_sync() {
 	encrypt_flag = 0;
 	decrypt_flag = 1;
 	char buf[BUFFLEN], rbuf[BUFFLEN], kis[16];
 	int fd, ret, tencrypt_index, tdecrypt_index;
 
-	con_serv(&fd, remote_ip, SERV_PORT); //ï¿½ï¿½ï¿½Ó¶Ô·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	con_serv(&fd, remote_ip, SERV_PORT); //Á¬½Ó¶Ô·½·şÎñÆ÷
 
 	sprintf(buf, "kisync %d %d\n", encrypt_flag, decrypt_flag);
 	send(fd, buf, strlen(buf), 0);
 
 	ret = read(fd, rbuf, sizeof(rbuf));
-	sscanf(rbuf, "%[^ ] %d %d", kis, &tencrypt_index, &tdecrypt_index); //scanf("%[^\n] ", s); ï¿½ï¿½ï¿½ï¿½Ò»ï¿½Ğ£ï¿½ï¿½Ø³ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ä©ï¿½Ø³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	sscanf(rbuf, "%[^ ] %d %d", kis, &tencrypt_index, &tdecrypt_index); //scanf("%[^\n] ", s); ÊäÈëÒ»ĞĞ£¬»Ø³µ×÷Îª½áÊø·û¡£ ĞĞÄ©»Ø³µ·û²»´¦Àí
 	close(fd);
 	if (tencrypt_index == decrypt_flag && tdecrypt_index == encrypt_flag) {
 		//close(fd);
@@ -162,11 +162,11 @@ bool key_index_sync() {
 	return false;
 }
 
-//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½É¾ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½
+//¸üĞÂÃÜÔ¿³Ø£¬¸üĞÂÉ¾³ıÃÜÔ¿Ë÷Òı
 void renewkey() {
 	//int delkeyindex, keyindex, sekeyindex, sdkeyindex
-	int delindex; 	//ÒªÉ¾ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-	pthread_rwlock_wrlock(&keywr); //ï¿½ï¿½ï¿½ï¿½
+	int delindex; 	//ÒªÉ¾³ıµÄÃÜÔ¿µÄË÷Òı
+	pthread_rwlock_wrlock(&keywr); //ÉÏËø
 	delindex = min(min(keyindex, sekeyindex), sdkeyindex);
 	if (delindex == 0) {
 		return;
@@ -178,7 +178,7 @@ void renewkey() {
 		exit(1);
 	}
 	else {
-		fseek(fp, delindex * KEY_UNIT_SIZE, SEEK_SET); //ï¿½Ä¼ï¿½Ö¸ï¿½ï¿½Æ«ï¿½Æµï¿½Ö¸ï¿½ï¿½Î»ï¿½ï¿½
+		fseek(fp, delindex * KEY_UNIT_SIZE, SEEK_SET); //ÎÄ¼şÖ¸ÕëÆ«ÒÆµ½Ö¸¶¨Î»ÖÃ
 		char buffer = fgetc(fp);
 		int cnt = 0;
 		while (!feof(fp)) {
@@ -200,20 +200,20 @@ void renewkey() {
 	else {
 		perror("rename error!");
 	}
-	pthread_rwlock_unlock(&keywr); //ï¿½ï¿½ï¿½ï¿½
+	pthread_rwlock_unlock(&keywr); //½âËø
 }
 
-//ï¿½ï¿½Ô¿Í¬ï¿½ï¿½,ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¶ï¿½Ë·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ï¿½ï¿½Ô¿Æ«ï¿½ï¿½
+//ÃÜÔ¿Í¬²½,±¾µØÓëÔ¶¶Ë·şÎñÆ÷½¨Á¢Á¬½ÓÍ¬²½ÃÜÔ¿Æ«ÒÆ
 bool key_sync() {
 
 	int fd, ret;
 	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
 	//struct sockaddr_in serv_addr, cli_addr;
 	//socklen_t client_addr_size;
-	sprintf(buf, "keysync %d %d %d\n", keyindex + delkeyindex, sekeyindex + delkeyindex, sdkeyindex + delkeyindex);
+	sprintf(buf, "keysync di:%d ei:%d di:%d\n", keyindex + delkeyindex, sekeyindex + delkeyindex, sdkeyindex + delkeyindex);
 
 
-	con_serv(&fd, remote_ip, SERV_PORT); //ï¿½ï¿½ï¿½Ó¶Ô·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	con_serv(&fd, remote_ip, SERV_PORT); //Á¬½Ó¶Ô·½·şÎñÆ÷
 
 
 	ret = send(fd, buf, strlen(buf), 0);
@@ -224,7 +224,7 @@ bool key_sync() {
 	ret = read(fd, rbuf, sizeof(rbuf));
 	//n = get_line(fd, buf, BUFFLEN);
 	int tkeyindex, tsekeyindex, tsdkeyindex;
-	sscanf(rbuf, "%[^ ] %d %d %d", method, &tkeyindex, &tsekeyindex, &tsdkeyindex);		//ï¿½Ş¸ï¿½
+	sscanf(rbuf, "%[^ ] %d %d %d", method, &tkeyindex, &tsekeyindex, &tsdkeyindex);		//ĞŞ¸Ä
 	keyindex = max(tkeyindex, keyindex + delkeyindex) - delkeyindex;
 	sekeyindex = max(tsdkeyindex, sekeyindex + delkeyindex) - delkeyindex;
 	sdkeyindex = max(tsekeyindex, sdkeyindex + delkeyindex) - delkeyindex;
@@ -237,11 +237,11 @@ bool key_sync() {
 
 
 
-//ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ­ï¿½ï¿½
+//ÃÜÔ¿ÅÉÉú²ÎÊıĞ­ÉÌ
 bool derive_sync() {
 	int fd, ret, tmp_keyd;
 	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
-	//Í¨ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½Ğ¶Ï½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	//Í¨¹ıÃÜÔ¿ÓàÁ¿ÅĞ¶Ï½ÓÏÂÀ´µÄÃÜÔ¿ÅÉÉú²ÎÊı
 	cur_ekeyd = next_ekeyd;
 	if (sdkeyindex > Th1 * MAX_KEYFILE_SIZE / KEY_UNIT_SIZE * 1 / 2 * (KEY_RATIO - 2) / KEY_RATIO) {
 		tmp_keyd = (int)next_ekeyd * up_index;
@@ -254,7 +254,7 @@ bool derive_sync() {
 	}
 	sprintf(buf, "desync %d\n", tmp_keyd);
 
-	con_serv(&fd, remote_ip, SERV_PORT); //ï¿½ï¿½ï¿½Ó¶Ô·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	con_serv(&fd, remote_ip, SERV_PORT); //Á¬½Ó¶Ô·½·şÎñÆ÷
 	ret = send(fd, buf, strlen(buf), 0);
 	if (ret < 0) {
 		perror("derive_sync connect error!\n");
@@ -271,19 +271,19 @@ bool derive_sync() {
 
 	return false;
 }
-//ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
+//¶ÁÈ¡±¾µØÃÜÔ¿
 void readkey(const char* buf, const char key_type, const char* keylen) {
 	int len = atoi(keylen);
 	char* pb = buf;
-	pthread_rwlock_rdlock(&keywr);  //ï¿½Ï¶ï¿½ï¿½ï¿½
+	pthread_rwlock_rdlock(&keywr);  //ÉÏ¶ÁËø
 	FILE* fp = fopen(KEY_FILE, "r");
 	if (fp == NULL) {
 		perror("open keyfile error!\n");
 		exit(1);
 	}
 	else {
-		if (key_type == '0') {  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-			//fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET); //ï¿½Ä¼ï¿½Ö¸ï¿½ï¿½Æ«ï¿½Æµï¿½Ö¸ï¿½ï¿½Î»ï¿½ï¿½
+		if (key_type == '0') {  //¼ÓÃÜÃÜÔ¿
+			//fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET); //ÎÄ¼şÖ¸ÕëÆ«ÒÆµ½Ö¸¶¨Î»ÖÃ
 			int i = 0;
 			while (i * KEY_UNIT_SIZE < len) {
 				if (sekeyindex % KEY_RATIO != 0 && (sekeyindex - 1) % KEY_RATIO != 0 && sekeyindex % 2 == (encrypt_flag)) {
@@ -296,8 +296,8 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 			}
 			rewind(fp);
 		}
-		else if (key_type == '1') {  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-			//fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET); //ï¿½Ä¼ï¿½Ö¸ï¿½ï¿½Æ«ï¿½Æµï¿½Ö¸ï¿½ï¿½Î»ï¿½ï¿½
+		else if (key_type == '1') {  //½âÃÜÃÜÔ¿
+			//fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET); //ÎÄ¼şÖ¸ÕëÆ«ÒÆµ½Ö¸¶¨Î»ÖÃ
 			int i = 0;
 			while (i * KEY_UNIT_SIZE < len) {
 				if (sdkeyindex % KEY_RATIO != 0 && (sdkeyindex - 1) % KEY_RATIO != 0 && sdkeyindex % 2 == (decrypt_flag)) {
@@ -310,8 +310,8 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 			}
 			rewind(fp);
 		}
-		else { //saï¿½ï¿½Ô¿ï¿½ï¿½Ô¤ï¿½È¹ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-			//fseek(fp, keyindex * KEY_UNIT_SIZE, SEEK_SET); //ï¿½Ä¼ï¿½Ö¸ï¿½ï¿½Æ«ï¿½Æµï¿½Ö¸ï¿½ï¿½Î»ï¿½ï¿½
+		else { //saÃÜÔ¿ºÍÔ¤ÏÈ¹²ÏíÃÜÔ¿
+			//fseek(fp, keyindex * KEY_UNIT_SIZE, SEEK_SET); //ÎÄ¼şÖ¸ÕëÆ«ÒÆµ½Ö¸¶¨Î»ÖÃ
 			int i = 0, plen = 0;
 			while (i * KEY_UNIT_SIZE < len) {
 				if (keyindex % KEY_RATIO == 0 || (keyindex - 1) % KEY_RATIO == 0) {
@@ -327,10 +327,10 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 
 	}
 	fclose(fp);
-	pthread_rwlock_unlock(&keywr); //ï¿½ï¿½ï¿½ï¿½
+	pthread_rwlock_unlock(&keywr); //½âËø
 }
 
-//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½
+//ÅÉÉúÃÜÔ¿º¯Êı
 void derive_key(const char* buf, const char* raw_key, const char* syn) {
 	strcpy(buf, raw_key);
 	//strcat(buf, syn);
@@ -349,9 +349,9 @@ void derive_key(const char* buf, const char* raw_key, const char* syn) {
 
 	//strcat(buf, syn);
 }
-//saï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+//saÃÜÔ¿ÇëÇó´¦Àí
 void getk_handle(const char* spi, const char* keylen, int fd) {
-	//ï¿½Ğ¶ï¿½ï¿½Ç·ï¿½ï¿½Ñ¾ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È½ï¿½ï¿½ï¿½Ë«ï¿½ï¿½Í¬ï¿½ï¿½
+	//ÅĞ¶ÏÊÇ·ñÒÑ¾­Í¬²½£¬Èç¹ûÃ»ÓĞÍ¬²½£¬Ê×ÏÈ½øĞĞË«·½Í¬²½
 	if (!key_sync_flag) {
 		bool ret = key_sync();
 		if (!ret) {
@@ -361,24 +361,24 @@ void getk_handle(const char* spi, const char* keylen, int fd) {
 	}
 
 	char buf[atoi(keylen)];
-	//ï¿½ï¿½È¡ï¿½ï¿½Ô¿
+	//¶ÁÈ¡ÃÜÔ¿
 	readkey(buf, '2', keylen);
 	send(fd, buf, atoi(keylen), 0);
 	key_sync_flag = false;
 
 }
-//ï¿½á»°ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+//»á»°ÃÜÔ¿ÇëÇó´¦Àí
 void getsk_handle(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
-	//ï¿½ï¿½ï¿½Ë«ï¿½ï¿½Ã»ï¿½ï¿½Í¬ï¿½ï¿½ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ø¶ï¿½Ó¦ï¿½ï¿½Ïµï¿½ï¿½ï¿½ï¿½ï¿½È½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½
+	//Èç¹ûË«·½Ã»ÓĞÍ¬²½¼Ó½âÃÜÃÜÔ¿³Ø¶ÔÓ¦¹ØÏµÔòÊ×ÏÈ½øĞĞÍ¬²½
 	int range = 0;
 	if (!(encrypt_flag ^ decrypt_flag)) {
 		bool ret = key_index_sync();
 		if (!ret) {
-			perror("key_index_sync errorï¿½ï¿½\n");
+			perror("key_index_sync error£¡\n");
 			return;
 		}
 	}
-	//ï¿½Ğ¶ï¿½synï¿½Ç·ï¿½Îª1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÒªÍ¬ï¿½ï¿½,Í¬Ê±ï¿½ï¿½ï¿½Õ·ï¿½ï¿½ï¿½key_sync_flagï¿½á±»ï¿½ï¿½ï¿½ï¿½Îªtrueï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½
+	//ÅĞ¶ÏsynÊÇ·ñÎª1£¬ÊÇÔò½øĞĞÍ¬²½£¬·ñÔò²»ĞèÒªÍ¬²½,Í¬Ê±½ÓÊÕ·½µÄkey_sync_flag»á±»ÉèÖÃÎªtrue£¬±ÜÃâ¶ş´ÎÍ¬²½
 	if (atoi(syn) == 1 && !key_sync_flag) {
 		bool ret = key_sync();
 		if (!ret) {
@@ -389,29 +389,35 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	//static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
 	
 	char buf[BUFFLEN], * pb = buf;
-	//ï¿½ï¿½È¡ï¿½ï¿½Ô¿
-	readkey(raw_ekey, *key_type, keylen);
-	
-	bool ret = derive_sync();
-	if (!ret) {
-		perror("derive_sync error!\n");
-		return;
+	if (*key_type == '0') {
+		bool ret = derive_sync(); //ÅÉÉú²ÎÊıÍ¬²½
+		if (!ret) {
+			perror("derive_sync error!\n");
+			return;
+		}
+		readkey(raw_ekey, *key_type, keylen); //¶ÁÈ¡ÃÜÔ¿
+		printf("qkey:%s kdp:%d\n", raw_ekey, cur_ekeyd);
+		sprintf(buf, "%s %d\n", raw_ekey, cur_ekeyd);
 	}
-	//range = cur_ekeyd;
-	sprintf(buf, "%s %d\n",raw_ekey, cur_ekeyd);
-	printf("%s\n", buf);
+	else {
+		readkey(raw_ekey, *key_type, keylen); //¶ÁÈ¡ÃÜÔ¿
+		printf("qkey:%s kdp:%d\n", raw_ekey, cur_dkeyd);
+		sprintf(buf, "%s %d\n", raw_ekey, cur_dkeyd);
+	}
+	
+	
 	send(fd, buf, strlen(buf), 0);
 }
 void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
-	//ï¿½ï¿½ï¿½Ë«ï¿½ï¿½Ã»ï¿½ï¿½Í¬ï¿½ï¿½ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ø¶ï¿½Ó¦ï¿½ï¿½Ïµï¿½ï¿½ï¿½ï¿½ï¿½È½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½
+	//Èç¹ûË«·½Ã»ÓĞÍ¬²½¼Ó½âÃÜÃÜÔ¿³Ø¶ÔÓ¦¹ØÏµÔòÊ×ÏÈ½øĞĞÍ¬²½
 	if (!(encrypt_flag ^ decrypt_flag)) {
 		bool ret = key_index_sync();
 		if (!ret) {
-			perror("key_index_sync errorï¿½ï¿½\n");
+			perror("key_index_sync error£¡\n");
 			return;
 		}
 	}
-	//ï¿½Ğ¶ï¿½synï¿½Ç·ï¿½Îª1ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÒªÍ¬ï¿½ï¿½,Í¬Ê±ï¿½ï¿½ï¿½Õ·ï¿½ï¿½ï¿½key_sync_flagï¿½á±»ï¿½ï¿½ï¿½ï¿½Îªtrueï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½
+	//ÅĞ¶ÏsynÊÇ·ñÎª1£¬ÊÇÔò½øĞĞÍ¬²½£¬·ñÔò²»ĞèÒªÍ¬²½,Í¬Ê±½ÓÊÕ·½µÄkey_sync_flag»á±»ÉèÖÃÎªtrue£¬±ÜÃâ¶ş´ÎÍ¬²½
 	if (atoi(syn) == 1 && !key_sync_flag) {
 		bool ret = key_sync();
 		if (!ret) {
@@ -420,7 +426,7 @@ void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, cons
 		}
 	}
 	static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
-	//ï¿½ï¿½Â¼ï¿½×¸ï¿½ï¿½ï¿½ï¿½İ°ï¿½ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½
+	//¼ÇÂ¼Ê×¸öÊı¾İ°ü¶ÔÓ¦µÄÁ¿×ÓÃÜÔ¿Ë÷ÒıÒÔ¼°ÃÜÔ¿´°¿Ú
 	if (atoi(syn) == 1 && *key_type == '0') {
 		ekey_sindex = sekeyindex;
 	}
@@ -429,28 +435,28 @@ void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, cons
 	}
 
 	char buf[BUFFLEN], * pb = buf;
-	//ï¿½ï¿½È¡ï¿½ï¿½Ô¿
-	if (*key_type == '0') {  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
-		if (atoi(syn) == 1 || atoi(syn) >= ekey_rw) {  //ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½Ğ³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ß³ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½Î§ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½Ô¿ï¿½Ô¼ï¿½synï¿½ï¿½ï¿½ï¿½,Ğ­ï¿½ï¿½ï¿½Âµï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	//¶ÁÈ¡ÃÜÔ¿
+	if (*key_type == '0') {  //¼ÓÃÜÃÜÔ¿
+		if (atoi(syn) == 1 || atoi(syn) >= ekey_rw) {  //Èç¹û»¹Ã»ÓĞ³õÊ¼µÄÃÜÔ¿»òÕß³¬³öÃÜÔ¿·şÎñ·¶Î§ĞèÒª¸üĞÂÔ­Ê¼ÃÜÔ¿ÒÔ¼°syn´°¿Ú,Ğ­ÉÌĞÂµÄÃÜÔ¿ÅÉÉú²ÎÊı
 			readkey(raw_ekey, *key_type, keylen);
-			//ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ­ï¿½ï¿½
+			//ÃÜÔ¿ÅÉÉú²ÎÊıĞ­ÉÌ
 			bool ret = derive_sync();
 			if (!ret) {
 				perror("derive_sync error!\n");
 				return;
 			}
-			//ï¿½ï¿½ï¿½Â´ï¿½ï¿½ï¿½
+			//¸üĞÂ´°¿Ú
 			ekey_lw = ekey_rw;
 			ekey_rw = ekey_rw + cur_ekeyd;
 		}
 		derive_key(buf, raw_ekey, syn);
 	}
-	else {  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿:ï¿½ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿Î¬ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ä´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½İ´ï¿½ï¿½È¥ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½Ó¦ï¿½ï¿½Ê§ï¿½ï¿½ï¿½ï¿½ï¿½
-		if (atoi(syn) == 1 || atoi(syn) >= dkey_rw) {  //ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½Ğ³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ß³ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½Î§ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½Ô¿ï¿½Ô¼ï¿½synï¿½ï¿½ï¿½ï¿½,Ğ­ï¿½ï¿½ï¿½Âµï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	else {  //½âÃÜÃÜÔ¿:¶ÔÓÚ½âÃÜÃÜÔ¿Î¬»¤Ò»¸ö¾ÉÃÜÔ¿µÄ´°¿ÚÀ´Ôİ´æ¹ıÈ¥µÄÃÜÔ¿ÒÔÓ¦¶ÔÊ§Ğò°ü¡£
+		if (atoi(syn) == 1 || atoi(syn) >= dkey_rw) {  //Èç¹û»¹Ã»ÓĞ³õÊ¼µÄÃÜÔ¿»òÕß³¬³öÃÜÔ¿·şÎñ·¶Î§ĞèÒª¸üĞÂÔ­Ê¼ÃÜÔ¿ÒÔ¼°syn´°¿Ú,Ğ­ÉÌĞÂµÄÃÜÔ¿ÅÉÉú²ÎÊı
 			strcpy(raw_olddkey, raw_dkey);
 			readkey(raw_dkey, *key_type, keylen);
-			//ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ğ­ï¿½ï¿½
-			//ï¿½ï¿½ï¿½Â´ï¿½ï¿½ï¿½
+			//ÃÜÔ¿ÅÉÉú²ÎÊıĞ­ÉÌ
+			//¸üĞÂ´°¿Ú
 			olddkey_lw = dkey_lw;
 			dkey_lw = dkey_rw;
 			dkey_rw = dkey_rw + cur_dkeyd;
@@ -471,7 +477,7 @@ void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* 
 	char buf[BUFFLEN];
 	sprintf(buf, "keysync %d %d %d\n", keyindex + delkeyindex, sekeyindex + delkeyindex, sdkeyindex + delkeyindex);
 	send(fd, buf, BUFFLEN, 0);
-	keyindex = max(atoi(tkeyindex), keyindex + delkeyindex) - delkeyindex;		//ï¿½Ş¸ï¿½
+	keyindex = max(atoi(tkeyindex), keyindex + delkeyindex) - delkeyindex;		//ĞŞ¸Ä
 	sekeyindex = max(atoi(tsdkeyindex), sekeyindex + delkeyindex) - delkeyindex;
 	sdkeyindex = max(atoi(tsekeyindex), sdkeyindex + delkeyindex) - delkeyindex;
 	//renewkey();
@@ -513,12 +519,12 @@ void do_recdata(int fd, int epfd) {
 		uint8_t method[32] = {}, path[256] = {}, protocol[16] = {}, arg1[64] = {}, arg2[64] = {}, arg3[64] = {}, arg4[64] = {};
 		int key_type;
 		sscanf(buf, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", method, arg1, arg2, arg3, arg4);
-		//ï¿½ï¿½Ó¦ï¿½ï¿½getk   arg1==spi, arg2=keylen(ï¿½Ö½ï¿½)
-		//ï¿½ï¿½Ó¦ï¿½ï¿½getsk  arg1==spi, arg2=keylen(ï¿½Ö½ï¿½), arg3=syn,arg4=keytype
-		//ï¿½ï¿½Ó¦ï¿½ï¿½keysync  arg1=keyindex, arg2=sekeyindex,arg3=sdkeyindex
-		//ï¿½ï¿½Ó¦ï¿½ï¿½key_index_sync arg1==encrypt_index, arg2==decrypt_index
-		//ï¿½ï¿½Ó¦ï¿½ï¿½derive_sync  arg1==key_d
-		printf("%s %s %s %s %s\n", method, arg1, arg2, arg3, arg4);
+		//¶ÔÓ¦ÓÚgetk   arg1==spi, arg2=keylen(×Ö½Ú)
+		//¶ÔÓ¦ÓÚgetsk  arg1==spi, arg2=keylen(×Ö½Ú), arg3=syn,arg4=keytype
+		//¶ÔÓ¦ÓÚkeysync  arg1=keyindex, arg2=sekeyindex,arg3=sdkeyindex
+		//¶ÔÓ¦ÓÚkey_index_sync arg1==encrypt_index, arg2==decrypt_index
+		//¶ÔÓ¦ÓÚderive_sync  arg1==key_d
+		printf("recieve:%s %s %s %s %s\n", method, arg1, arg2, arg3, arg4);
 		while (1)
 		{
 			n = get_line(fd, buf, BUFFLEN);
@@ -572,7 +578,7 @@ int init_listen(int port, int epfd) {
 		perror("socket create error!\n");
 		exit(1);
 	}
-	//ï¿½Ë¿Ú¸ï¿½ï¿½ï¿½
+	//¶Ë¿Ú¸´ÓÃ
 	int opt = 1;
 	setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -581,9 +587,9 @@ int init_listen(int port, int epfd) {
 		perror("bind error!\n");
 		exit(1);
 	}
-	//listenï¿½ï¿½ï¿½ï¿½
+	//listenÉÏÏŞ
 	listen(lfd, 128);
-	//ï¿½ï¿½ï¿½Ó¼ï¿½ï¿½ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½
+	//Ìí¼Ó¼àÌıÊÂ¼şÉÏÊ÷
 	tep.events = EPOLLIN;
 	tep.data.fd = lfd;
 	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &tep);
@@ -608,10 +614,10 @@ void epoll_run(int port) {
 		}
 		for (i = 0; i < ret; i++) {
 			if (ep[i].events & EPOLLIN && ep[i].data.fd == lfd) {
-				do_crecon(lfd, epfd);  //ï¿½Â½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â¼ï¿½
+				do_crecon(lfd, epfd);  //ĞÂ½¨Á¬½ÓÊÂ¼ş
 			}
 			else if (ep[i].events & EPOLLIN) {
-				do_recdata(ep[i].data.fd, epfd); //ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ï¿½Â¼ï¿½
+				do_recdata(ep[i].data.fd, epfd); //ÃÜÔ¿ÇëÇó¼°Í¬²½ÊÂ¼ş
 			}
 			else {
 				continue;
@@ -620,7 +626,7 @@ void epoll_run(int port) {
 	}
 
 }
-//ï¿½Ö·ï¿½×ªï¿½ï¿½
+//×Ö·û×ª»»
 char transform(int i) {
 	if (i < 10) {
 		return i + '0';
@@ -644,52 +650,52 @@ char transform(int i) {
 		return 'f';
 	}
 }
-//ï¿½ï¿½Ô¿Ğ´ï¿½ï¿½ï¿½ß³ï¿½
+//ÃÜÔ¿Ğ´ÈëÏß³Ì
 void* thread_write() {
-	//ï¿½ï¿½ï¿½È¶ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½Ö¸ï¿½ë£ºfp
+	//Ê×ÏÈ¶¨ÒåÎÄ¼şÖ¸Õë£ºfp
 	FILE* fp;
 	remove(KEY_FILE);
 	printf("key supply starting...\n");
-	//Ä£ï¿½â²»ï¿½ï¿½Ğ´ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½Ä¼ï¿½
+	//Ä£Äâ²»¶ÏĞ´ÈëÃÜÔ¿µ½ÃÜÔ¿³ØÎÄ¼ş
 	while (1) {
 		char buf[KEY_CREATE_RATE];
 		int i = 0;
 		srand((unsigned int)time(NULL));
-		for (; i < KEY_CREATE_RATE; i++) { //ï¿½ï¿½ï¿½ï¿½Î³ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½
+		for (; i < KEY_CREATE_RATE; i++) { //Ëæ»úĞÎ³ÉÃÜÔ¿´®
 			//srand((unsigned int)time(NULL));
 			int ret = i % 16;
 			buf[i] = transform(ret);
 		}
-
-		pthread_rwlock_wrlock(&keywr); //ï¿½ï¿½ï¿½ï¿½
+		renewkey();
+		pthread_rwlock_wrlock(&keywr); //ÉÏËø
 		fp = fopen(KEY_FILE, "a+");
-		fseek(fp, 0, SEEK_END); //ï¿½ï¿½Î»ï¿½ï¿½ï¿½Ä¼ï¿½Ä© 
-		int nFileLen = ftell(fp); //ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½
-		fseek(fp, 0, SEEK_SET); //ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½Í·
-		//ï¿½Ğ¶ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½Ğ¡ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½è¶¨ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½
+		fseek(fp, 0, SEEK_END); //¶¨Î»µ½ÎÄ¼şÄ© 
+		int nFileLen = ftell(fp); //ÎÄ¼ş³¤¶È
+		fseek(fp, 0, SEEK_SET); //»Ö¸´µ½ÎÄ¼şÍ·
+		//ÅĞ¶ÏÎÄ¼ş´óĞ¡£¬ÈôÎÄ¼ş´óÓÚÉè¶¨µÄÖµÔò²»ÔÙĞ´Èë
 		if (nFileLen < MAX_KEYFILE_SIZE) {
 			fputs(buf, fp);
 			//printf("%s\n", buf);
 		}
 		fclose(fp);
-		pthread_rwlock_unlock(&keywr); //ï¿½ï¿½ï¿½ï¿½
+		pthread_rwlock_unlock(&keywr); //½âËø
 
-		sleep(1); //ï¿½È´ï¿½1s
+		sleep(1); //µÈ´ı1s
 	}
 
 	pthread_exit(0);
 }
 int main(int argc, char* argv[]) {
 
-	key_sync_flag = false, skey_sync_flag = false; //ï¿½ï¿½Ô¿Í¬ï¿½ï¿½ï¿½ï¿½Ö¾ï¿½ï¿½ï¿½ï¿½Îªfalse
-	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0;  //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ô¿Æ«ï¿½ï¿½
-	pthread_rwlock_init(&keywr, NULL); //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ğ´ï¿½ï¿½
-	encrypt_flag = 0, decrypt_flag = 0; //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½Ó½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½Ø¶ï¿½Ó¦ï¿½ï¿½Ïµ
-	cur_ekeyd = INIT_KEYD;  //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	key_sync_flag = false, skey_sync_flag = false; //ÃÜÔ¿Í¬²½±êÖ¾ÉèÖÃÎªfalse
+	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0;  //³õÊ¼»¯ÃÜÔ¿Æ«ÒÆ
+	pthread_rwlock_init(&keywr, NULL); //³õÊ¼»¯¶ÁĞ´Ëø
+	encrypt_flag = 0, decrypt_flag = 0; //³õÊ¼»¯¼Ó½âÃÜÃÜÔ¿³Ø¶ÔÓ¦¹ØÏµ
+	cur_ekeyd = INIT_KEYD;  //³õÊ¼»¯ÃÜÔ¿ÅÉÉú²ÎÊı
 	next_ekeyd = INIT_KEYD;
-	cur_dkeyd = INIT_KEYD;  //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	cur_dkeyd = INIT_KEYD;  //³õÊ¼»¯ÃÜÔ¿ÅÉÉú²ÎÊı
 	next_dkeyd = INIT_KEYD;
-	//raw_ekey = NULL, prived_ekey = NULL;  //ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿
+	//raw_ekey = NULL, prived_ekey = NULL;  //³õÊ¼»¯¼ÓÃÜÃÜÔ¿
 
 	int fd, ar, ret, count = 0, n, i, epfd;
 	struct epoll_event tep, ep[MAXS];
@@ -698,7 +704,7 @@ int main(int argc, char* argv[]) {
 	if (argc < 2) {
 		perror("Missing parameter\n");
 		exit(1);
-		//Ä¬ï¿½Ï·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë¿ï¿½
+		//Ä¬ÈÏ·şÎñÆ÷¼àÌı¶Ë¿Ú
 		SERV_PORT = DF_SERV_PORT;
 	}
 	else if (argc < 3) {
@@ -711,11 +717,11 @@ int main(int argc, char* argv[]) {
 		SERV_PORT = atoi(argv[2]);
 	}
 
-	pthread_create(&tid, NULL, thread_write, NULL);  //ï¿½ï¿½Ô¿Ğ´ï¿½ï¿½ï¿½ß³ï¿½ï¿½ï¿½ï¿½ï¿½
-	pthread_detach(tid); //ï¿½ß³Ì·ï¿½ï¿½ï¿½
+	pthread_create(&tid, NULL, thread_write, NULL);  //ÃÜÔ¿Ğ´ÈëÏß³ÌÆô¶¯
+	pthread_detach(tid); //Ïß³Ì·ÖÀë
 
-	epoll_run(SERV_PORT); //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½ï¿½
+	epoll_run(SERV_PORT); //Æô¶¯¼àÌı·şÎñÆ÷£¬¿ªÊ¼¼àÌıÃÜÔ¿ÇëÇó
 
-	pthread_rwlock_destroy(&keywr); //ï¿½ï¿½ï¿½Ù¶ï¿½Ğ´ï¿½ï¿½
+	pthread_rwlock_destroy(&keywr); //Ïú»Ù¶ÁĞ´Ëø
 	return 0;
 }
