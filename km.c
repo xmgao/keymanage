@@ -21,7 +21,7 @@
 
 
 
-//  编译: gcc km.c -o km -g -pthread -lcrypto
+//  编译: gcc km.c -o km -g -pthread 
 //运行 ./km remoteip
 
 //#define max(a,b) 
@@ -287,7 +287,8 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 			//fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET); //文件指针偏移到指定位置
 			int i = 0;
 			while (i * KEY_UNIT_SIZE < len) {
-				if (sekeyindex % KEY_RATIO != 0 && (sekeyindex - 1) % KEY_RATIO != 0 && sekeyindex % 2 == (encrypt_flag)) {
+				//这里加上删除密钥索引
+				if ((sekeyindex+ delkeyindex) % KEY_RATIO != 0 && ((sekeyindex+ delkeyindex) - 1) % KEY_RATIO != 0 && (sekeyindex+ delkeyindex) % 2 == (encrypt_flag)) {
 					fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET);
 					fgets(pb, KEY_UNIT_SIZE + 1, fp);
 					i++;
@@ -301,7 +302,7 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 			//fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET); //文件指针偏移到指定位置
 			int i = 0;
 			while (i * KEY_UNIT_SIZE < len) {
-				if (sdkeyindex % KEY_RATIO != 0 && (sdkeyindex - 1) % KEY_RATIO != 0 && sdkeyindex % 2 == (decrypt_flag)) {
+				if ((sdkeyindex+ delkeyindex) % KEY_RATIO != 0 && (sdkeyindex+ delkeyindex - 1) % KEY_RATIO != 0 && (sdkeyindex+ delkeyindex) % 2 == (decrypt_flag)) {
 					fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET);
 					fgets(pb, KEY_UNIT_SIZE + 1, fp);
 					i++;
@@ -315,7 +316,7 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 			//fseek(fp, keyindex * KEY_UNIT_SIZE, SEEK_SET); //文件指针偏移到指定位置
 			int i = 0, plen = 0;
 			while (i * KEY_UNIT_SIZE < len) {
-				if (keyindex % KEY_RATIO == 0 || (keyindex - 1) % KEY_RATIO == 0) {
+				if ((keyindex+ delkeyindex) % KEY_RATIO == 0 || ((keyindex+ delkeyindex) - 1) % KEY_RATIO == 0) {
 					fseek(fp, keyindex * KEY_UNIT_SIZE, SEEK_SET);
 					fgets(pb, KEY_UNIT_SIZE + 1, fp);
 					i++;
@@ -368,7 +369,9 @@ void getk_handle(const char* spi, const char* keylen, int fd) {
 	key_sync_flag = false;
 
 }
+
 //会话密钥请求处理
+//目前窗口放在strongswan里，超过窗口大小时才调用处理函数，减少通信
 void getsk_handle(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
 	//如果双方没有同步加解密密钥池对应关系则首先进行同步
 	int range = 0;
@@ -409,70 +412,72 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	
 	send(fd, buf, strlen(buf), 0);
 }
-void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
-	//如果双方没有同步加解密密钥池对应关系则首先进行同步
-	if (!(encrypt_flag ^ decrypt_flag)) {
-		bool ret = key_index_sync();
-		if (!ret) {
-			perror("key_index_sync error！\n");
-			return;
-		}
-	}
-	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
-	if (atoi(syn) == 1 && !key_sync_flag) {
-		bool ret = key_sync();
-		if (!ret) {
-			perror("key_sync error!\n");
-			return;
-		}
-	}
-	static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
-	//记录首个数据包对应的量子密钥索引以及密钥窗口
-	if (atoi(syn) == 1 && *key_type == '0') {
-		ekey_sindex = sekeyindex;
-	}
-	if (atoi(syn) == 1 && *key_type == '1') {
-		dkey_sindex = sdkeyindex;
-	}
 
-	char buf[BUFFLEN], * pb = buf;
-	//读取密钥
-	if (*key_type == '0') {  //加密密钥
-		if (atoi(syn) == 1 || atoi(syn) >= ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
-			readkey(raw_ekey, *key_type, keylen);
-			//密钥派生参数协商
-			bool ret = derive_sync();
-			if (!ret) {
-				perror("derive_sync error!\n");
-				return;
-			}
-			//更新窗口
-			ekey_lw = ekey_rw;
-			ekey_rw = ekey_rw + cur_ekeyd;
-		}
-		derive_key(buf, raw_ekey, syn);
-	}
-	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
-		if (atoi(syn) == 1 || atoi(syn) >= dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
-			strcpy(raw_olddkey, raw_dkey);
-			readkey(raw_dkey, *key_type, keylen);
-			//密钥派生参数协商
-			//更新窗口
-			olddkey_lw = dkey_lw;
-			dkey_lw = dkey_rw;
-			dkey_rw = dkey_rw + cur_dkeyd;
-		}
-		if (atoi(syn) < dkey_lw) {
-			derive_key(buf, raw_olddkey, syn);
-		}
-		else if (atoi(syn) >= dkey_lw && atoi(syn) < dkey_rw) {
-			derive_key(buf, raw_dkey, syn);
-		}
 
-	}
-	printf("%s\n", buf);
-	send(fd, buf, atoi(keylen), 0);
-}
+// void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
+// 	//如果双方没有同步加解密密钥池对应关系则首先进行同步
+// 	if (!(encrypt_flag ^ decrypt_flag)) {
+// 		bool ret = key_index_sync();
+// 		if (!ret) {
+// 			perror("key_index_sync error！\n");
+// 			return;
+// 		}
+// 	}
+// 	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
+// 	if (atoi(syn) == 1 && !key_sync_flag) {
+// 		bool ret = key_sync();
+// 		if (!ret) {
+// 			perror("key_sync error!\n");
+// 			return;
+// 		}
+// 	}
+// 	static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
+// 	//记录首个数据包对应的量子密钥索引以及密钥窗口
+// 	if (atoi(syn) == 1 && *key_type == '0') {
+// 		ekey_sindex = sekeyindex;
+// 	}
+// 	if (atoi(syn) == 1 && *key_type == '1') {
+// 		dkey_sindex = sdkeyindex;
+// 	}
+
+// 	char buf[BUFFLEN], * pb = buf;
+// 	//读取密钥
+// 	if (*key_type == '0') {  //加密密钥
+// 		if (atoi(syn) == 1 || atoi(syn) >= ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
+// 			readkey(raw_ekey, *key_type, keylen);
+// 			//密钥派生参数协商
+// 			bool ret = derive_sync();
+// 			if (!ret) {
+// 				perror("derive_sync error!\n");
+// 				return;
+// 			}
+// 			//更新窗口
+// 			ekey_lw = ekey_rw;
+// 			ekey_rw = ekey_rw + cur_ekeyd;
+// 		}
+// 		derive_key(buf, raw_ekey, syn);
+// 	}
+// 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
+// 		if (atoi(syn) == 1 || atoi(syn) >= dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
+// 			strcpy(raw_olddkey, raw_dkey);
+// 			readkey(raw_dkey, *key_type, keylen);
+// 			//密钥派生参数协商
+// 			//更新窗口
+// 			olddkey_lw = dkey_lw;
+// 			dkey_lw = dkey_rw;
+// 			dkey_rw = dkey_rw + cur_dkeyd;
+// 		}
+// 		if (atoi(syn) < dkey_lw) {
+// 			derive_key(buf, raw_olddkey, syn);
+// 		}
+// 		else if (atoi(syn) >= dkey_lw && atoi(syn) < dkey_rw) {
+// 			derive_key(buf, raw_dkey, syn);
+// 		}
+
+// 	}
+// 	printf("%s\n", buf);
+// 	send(fd, buf, atoi(keylen), 0);
+// }
 void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* tsdkeyindex, int fd) {
 
 	char buf[BUFFLEN];
