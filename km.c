@@ -28,14 +28,14 @@
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define  MAXS 1024  //最大监听数量
-#define  BUFFLEN 1024 //buf大小
+#define  BUFFLEN 1500 //buf大小
 #define  DF_SERV_PORT 50000 //默认服务器监听端口
-#define  MAX_KEYFILE_SIZE  4096000  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥
-#define  KEY_CREATE_RATE  1280  //密钥每秒生成长度
+#define  MAX_KEYFILE_SIZE  40960000  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 40M
+#define  KEY_CREATE_RATE  256000  //密钥每秒生成长度 256kbps
 #define  KEY_UNIT_SIZE    4   //密钥基本存储单位4字节
 #define  KEY_RATIO       100    //SA密钥与会话密钥的比值
-#define  KEY_FILE   "/home/keyfile.kf"   //密钥文件
-#define  TEMPKEY_FILE   "/home/tempkeyfile.kf"   //密钥文件
+#define  KEY_FILE   "keyfile.kf"   //密钥文件
+#define  TEMPKEY_FILE   "tempkeyfile.kf"   //密钥文件
 #define  REMOTE_IPADDR "127.0.0.1"   //对方服务器的ip地址
 #define  INIT_KEYD   10000 //初始密钥派生参数
 #define  up_index  2  //派生增长因子
@@ -49,14 +49,20 @@ int delkeyindex, keyindex, sekeyindex, sdkeyindex;  //密钥索引，用于删除过期密钥
 int encrypt_flag, decrypt_flag;  //加密密钥以及解密密钥的对应关系，0标识加密密钥，1标识解密密钥
 int SERV_PORT;  //服务器监听端口
 int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;   //记录当前的密钥派生参数和下一个密钥派生参数
-int ekey_sindex, dkey_sindex;   //记录一个加解密密钥syn==1的数据包对应的密钥索引
-char  raw_ekey[64], raw_dkey[64], raw_olddkey[64], prived_dkey[64], prived_ekey[64];  //记录原始量子密钥和派生密钥
+char  raw_ekey[64];//记录原始量子密钥
 char remote_ip[32];  //记录远程ip地址
 
-struct s_info {
-	struct sockaddr_in  addr;
-	int connfd;
-};
+//用于OTP的密钥块结构体
+typedef struct {
+    char key[1024];
+    int size;
+} Keyblock;
+
+//指定密钥块的初始值128字节
+int M=128;
+
+Keyblock *ekeybuff,*dkeybuff,*olddkeybuff;
+
 int get_line(int cfd, char* buf, int size)
 {
 	int i = 0;
@@ -102,7 +108,7 @@ void do_crecon(int fd, int epfd) {
 	char cli_ip[16];
 	int client_addr_size, ret;
 	struct epoll_event tep;
-	int ar = accept(fd, (struct sockaddr_in*)&cli_addr, &client_addr_size);
+	int ar = accept(fd, (struct sockaddr_in*)(&cli_addr), &client_addr_size);
 	printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)),
 		ntohs(cli_addr.sin_port));
 	//设置ar socket非阻塞
@@ -133,10 +139,10 @@ void con_serv(int* fd, const char* src, int port) {
 	serv_addr.sin_port = htons(SERV_PORT);
 	inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
 
-	cr = connect(*fd, &serv_addr, sizeof(serv_addr)); //连接对方服务器
+	cr = connect(*fd,(struct sockaddr_in*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
 	if (cr < 0) {
 		perror("key_sync connect error!\n");
-		return false;
+		return ;
 	}
 }
 //加解密密钥对应关系同步
@@ -152,7 +158,7 @@ bool key_index_sync() {
 	send(fd, buf, strlen(buf), 0);
 
 	ret = read(fd, rbuf, sizeof(rbuf));
-	sscanf(rbuf, "%[^ ] %d %d", kis, &tencrypt_index, &tdecrypt_index); //scanf("%[^\n] ", s); 输入一行，回车作为结束符。 行末回车符不处理
+	sscanf(rbuf, "%[^ ] %d %d", kis, &tencrypt_index, &tdecrypt_index); //scanf("%[^\n] ", s); 输入一行，回车作为结束符。 行末回车符不处理; %[^ ]表示除了空格都可以读
 	close(fd);
 	if (tencrypt_index == decrypt_flag && tdecrypt_index == encrypt_flag) {
 		//close(fd);
@@ -232,6 +238,7 @@ bool key_sync() {
 
 	//renewkey();
 	close(fd);
+	key_sync_flag = true;
 	return true;
 }
 
@@ -273,7 +280,7 @@ bool derive_sync() {
 	return false;
 }
 //读取本地密钥
-void readkey(const char* buf, const char key_type, const char* keylen) {
+void readkey(char* const buf, const char key_type, const char* keylen) {
 	int len = atoi(keylen);
 	char* pb = buf;
 	pthread_rwlock_rdlock(&keywr);  //上读锁
@@ -332,8 +339,53 @@ void readkey(const char* buf, const char key_type, const char* keylen) {
 	pthread_rwlock_unlock(&keywr); //解锁
 }
 
+//读取本地密钥
+void readkey_otp(char* const buf, const char key_type, int size) {
+	int len = size;
+	char* pb = buf;
+	pthread_rwlock_rdlock(&keywr);  //上读锁
+	FILE* fp = fopen(KEY_FILE, "r");
+	if (fp == NULL) {
+		perror("open keyfile error!\n");
+		exit(1);
+	}
+	else {
+		if (key_type == '0') {  //加密密钥
+			//fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET); //文件指针偏移到指定位置
+			int i = 0;
+			while (i * KEY_UNIT_SIZE < len) {
+				//这里加上删除密钥索引
+				if ((sekeyindex+ delkeyindex) % KEY_RATIO != 0 && ((sekeyindex+ delkeyindex) - 1) % KEY_RATIO != 0 && (sekeyindex+ delkeyindex) % 2 == (encrypt_flag)) {
+					fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET);
+					fgets(pb, KEY_UNIT_SIZE + 1, fp);
+					i++;
+					pb += KEY_UNIT_SIZE;
+				}
+				sekeyindex++;
+			}
+			rewind(fp);
+		}
+		else if (key_type == '1') {  //解密密钥
+			//fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET); //文件指针偏移到指定位置
+			int i = 0;
+			while (i * KEY_UNIT_SIZE < len) {
+				if ((sdkeyindex+ delkeyindex) % KEY_RATIO != 0 && (sdkeyindex+ delkeyindex - 1) % KEY_RATIO != 0 && (sdkeyindex+ delkeyindex) % 2 == (decrypt_flag)) {
+					fseek(fp, sdkeyindex * KEY_UNIT_SIZE, SEEK_SET);
+					fgets(pb, KEY_UNIT_SIZE + 1, fp);
+					i++;
+					pb += KEY_UNIT_SIZE;
+				}
+				sdkeyindex++;
+			}
+			rewind(fp);
+		}
+	}
+	fclose(fp);
+	pthread_rwlock_unlock(&keywr); //解锁
+}
+
 //派生密钥函数
-void derive_key(const char* buf, const char* raw_key, const char* syn) {
+void derive_key(char* const buf, const char* raw_key, const char* syn) {
 	strcpy(buf, raw_key);
 	//strcat(buf, syn);
 	//unsigned char sha1[SHA_DIGEST_LENGTH];
@@ -351,6 +403,8 @@ void derive_key(const char* buf, const char* raw_key, const char* syn) {
 
 	//strcat(buf, syn);
 }
+
+
 //sa密钥请求处理
 void getk_handle(const char* spi, const char* keylen, int fd) {
 	//判断是否已经同步，如果没有同步，首先进行双方同步
@@ -366,7 +420,7 @@ void getk_handle(const char* spi, const char* keylen, int fd) {
 	//读取密钥
 	readkey(buf, '2', keylen);
 	send(fd, buf, atoi(keylen), 0);
-	key_sync_flag = false;
+	key_sync_flag = true;
 
 }
 
@@ -392,7 +446,7 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	}
 	//static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
 	
-	char buf[BUFFLEN], * pb = buf;
+	char buf[BUFFLEN];
 	if (*key_type == '0') {
 		bool ret = derive_sync(); //派生参数同步
 		if (!ret) {
@@ -400,12 +454,12 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 			return;
 		}
 		readkey(raw_ekey, *key_type, keylen); //读取密钥
-		printf("qkey:%s kdp:%d\n", raw_ekey, cur_ekeyd);
+		printf("qkey:%s kdp:%d sei:%d sdi:%d \n", raw_ekey, cur_ekeyd, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", raw_ekey, cur_ekeyd);
 	}
 	else {
 		readkey(raw_ekey, *key_type, keylen); //读取密钥
-		printf("qkey:%s kdp:%d\n", raw_ekey, cur_dkeyd);
+		printf("qkey:%s kdp:%d sei:%d sdi:%d \n", raw_ekey, cur_ekeyd, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", raw_ekey, cur_dkeyd);
 	}
 	
@@ -413,6 +467,75 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	send(fd, buf, strlen(buf), 0);
 }
 
+
+void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, int fd) {
+	int seq=atoi(syn);
+	//如果双方没有同步加解密密钥池对应关系则首先进行同步
+	if (!(encrypt_flag ^ decrypt_flag)) {
+		bool ret = key_index_sync();
+		if (!ret) {
+			perror("key_index_sync error！\n");
+			return;
+		}
+	}
+	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
+	if (seq == 1 && !key_sync_flag) {
+		bool ret = key_sync();
+		if (!ret) {
+			perror("key_sync error!\n");
+			return;
+		}
+	}
+	static int  ekey_rw=0, dkey_lw=1, dkey_rw=1024, olddkey_lw;
+	char buf[BUFFLEN];
+	//读取密钥
+	if (*key_type == '0') {  //加密密钥
+		if (seq == 1 || seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
+			if(ekeybuff!=NULL) free(ekeybuff);
+			ekeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
+			for(int i=0;i<1024;i++){
+				readkey_otp(ekeybuff[i].key, *key_type, M);
+				ekeybuff[i].size=M;
+			}
+			//更新窗口
+			if(seq > ekey_rw){
+				ekey_rw = ekey_rw + 1024;
+			}
+		}
+		printf("qkey:%s size:%d", ekeybuff[(seq-1)%1024].key, ekeybuff[(seq-1)%1024].size);
+		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%1024].key, ekeybuff[(seq-1)%1024].size);
+	}
+	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
+		if (seq == 1 || seq > dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
+			if(olddkeybuff!=NULL) free(olddkeybuff);
+			olddkeybuff=dkeybuff;
+			dkeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
+			for(int i=0;i<1024;i++){
+				readkey_otp(dkeybuff[i].key, *key_type, M);
+				dkeybuff[i].size=M;
+			}
+			//密钥派生参数协商
+			//更新窗口
+			if(seq > dkey_rw){
+			olddkey_lw = dkey_lw;
+			dkey_lw = dkey_rw+1;
+			dkey_rw = dkey_rw + 1024;
+			}
+
+		}
+
+		if (seq < dkey_lw) {
+			printf("qkey:%s size:%d", olddkeybuff[(seq-1)%1024].key, olddkeybuff[(seq-1)%1024].size);
+			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%1024].key, olddkeybuff[(seq-1)%1024].size);
+		}
+		
+		else if (seq >= dkey_lw && seq <= dkey_rw) {
+			printf("qkey:%s size:%d", dkeybuff[(seq-1)%1024].key, dkeybuff[(seq-1)%1024].size);
+			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%1024].key, dkeybuff[(seq-1)%1024].size);
+		}
+	}
+	send(fd, buf, strlen(buf), 0);
+}
 
 // void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
 // 	//如果双方没有同步加解密密钥池对应关系则首先进行同步
@@ -478,6 +601,7 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 // 	printf("%s\n", buf);
 // 	send(fd, buf, atoi(keylen), 0);
 // }
+
 void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* tsdkeyindex, int fd) {
 
 	char buf[BUFFLEN];
@@ -521,12 +645,13 @@ void do_recdata(int fd, int epfd) {
 	}
 	else {
 
-		//memcpy(path, buf + l + 1, s - l - 1);
+
 		uint8_t method[32] = {}, path[256] = {}, protocol[16] = {}, arg1[64] = {}, arg2[64] = {}, arg3[64] = {}, arg4[64] = {};
 		int key_type;
 		sscanf(buf, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", method, arg1, arg2, arg3, arg4);
 		//对应于getk   arg1==spi, arg2=keylen(字节)
 		//对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype
+		//对应于getskotp  arg1==spi, arg2=syn,arg3=keytype
 		//对应于keysync  arg1=keyindex, arg2=sekeyindex,arg3=sdkeyindex
 		//对应于key_index_sync arg1==encrypt_index, arg2==decrypt_index
 		//对应于derive_sync  arg1==key_d
@@ -548,6 +673,10 @@ void do_recdata(int fd, int epfd) {
 		if (strncasecmp(method, "getk", 4) == 0) {
 			//char* p = path + 1;
 			getk_handle(arg1, arg2, fd);
+			discon(fd, epfd);
+		}
+		else if (strncasecmp(method, "getskotp", 8) == 0) {
+			getsk_handle_otp(arg1, arg2, arg3, fd);
 			discon(fd, epfd);
 		}
 		else if (strncasecmp(method, "getsk", 5) == 0) {
@@ -672,7 +801,7 @@ void* thread_write() {
 			int ret = i % 16;
 			buf[i] = transform(ret);
 		}
-		renewkey();
+		//renewkey();  先不考虑更新密钥池
 		pthread_rwlock_wrlock(&keywr); //上锁
 		fp = fopen(KEY_FILE, "a+");
 		fseek(fp, 0, SEEK_END); //定位到文件末 
