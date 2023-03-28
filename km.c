@@ -33,7 +33,7 @@
 #define  MAX_KEYFILE_SIZE  40960000  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 40M
 #define  KEY_CREATE_RATE  256000  //密钥每秒生成长度 256kbps
 #define  KEY_UNIT_SIZE    4   //密钥基本存储单位4字节
-#define  KEY_RATIO       100    //SA密钥与会话密钥的比值
+#define  KEY_RATIO       1000    //SA密钥与会话密钥的比值
 #define  KEY_FILE   "keyfile.kf"   //密钥文件
 #define  TEMPKEY_FILE   "tempkeyfile.kf"   //密钥文件
 #define  REMOTE_IPADDR "127.0.0.1"   //对方服务器的ip地址
@@ -44,7 +44,7 @@
 #define  Th2  0.3	//下界
 
 pthread_rwlock_t keywr;
-bool key_sync_flag, skey_sync_flag;  //两种密钥同步标志，一种用于供应sa协商，一种用于加密的会话密钥
+bool key_sync_flag;  //密钥同步标志
 int delkeyindex, keyindex, sekeyindex, sdkeyindex;  //密钥索引，用于删除过期密钥，标识当前的sa密钥,加密密钥，解密密钥
 int encrypt_flag, decrypt_flag;  //加密密钥以及解密密钥的对应关系，0标识加密密钥，1标识解密密钥
 int SERV_PORT;  //服务器监听端口
@@ -59,7 +59,7 @@ typedef struct {
 } Keyblock;
 
 //指定密钥块的初始值128字节
-int M=128;
+int M=128,nextM=128;
 
 Keyblock *ekeybuff,*dkeybuff,*olddkeybuff;
 
@@ -174,7 +174,7 @@ void renewkey() {
 	//int delkeyindex, keyindex, sekeyindex, sdkeyindex
 	int delindex; 	//要删除的密钥的索引
 	pthread_rwlock_wrlock(&keywr); //上锁
-	delindex = min(min(keyindex, sekeyindex), sdkeyindex);
+	delindex = min(sdkeyindex, sekeyindex);
 	if (delindex == 0) {
 		return;
 	}
@@ -199,7 +199,7 @@ void renewkey() {
 	remove(KEY_FILE);
 	if (rename(TEMPKEY_FILE, KEY_FILE) == 0) {
 		delkeyindex += delindex;
-		keyindex -= delindex;
+		keyindex = 0;
 		sekeyindex -= delindex;
 		sdkeyindex -= delindex;
 		printf("key pool renewed...\ndelkeyindex:%d  keyindex:%d  sekeyindex:%d  sdkeyindex:%d \n", delkeyindex, keyindex, sekeyindex, sdkeyindex);
@@ -385,24 +385,24 @@ void readkey_otp(char* const buf, const char key_type, int size) {
 }
 
 //派生密钥函数
-void derive_key(char* const buf, const char* raw_key, const char* syn) {
-	strcpy(buf, raw_key);
-	//strcat(buf, syn);
-	//unsigned char sha1[SHA_DIGEST_LENGTH];
-	//SHA1(buf, strlen(buf), sha1);
-	//strcpy(buf, sha1);
+// void derive_key(char* const buf, const char* raw_key, const char* syn) {
+// 	strcpy(buf, raw_key);
+// 	//strcat(buf, syn);
+// 	//unsigned char sha1[SHA_DIGEST_LENGTH];
+// 	//SHA1(buf, strlen(buf), sha1);
+// 	//strcpy(buf, sha1);
 
-	/*
-	char* p1 = buf, * p2 = syn;
-	while (*p1 != ' ' && *p2 != ' ') {
-		*p1 = *p1 ^ *p2;
-		p1++;
-		p2++;
-	}
-	*/
+// 	/*
+// 	char* p1 = buf, * p2 = syn;
+// 	while (*p1 != ' ' && *p2 != ' ') {
+// 		*p1 = *p1 ^ *p2;
+// 		p1++;
+// 		p2++;
+// 	}
+// 	*/
 
-	//strcat(buf, syn);
-}
+// 	//strcat(buf, syn);
+// }
 
 
 //sa密钥请求处理
@@ -493,6 +493,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		if (seq == 1 || seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
 			if(ekeybuff!=NULL) free(ekeybuff);
 			ekeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
+			M=nextM;
 			for(int i=0;i<1024;i++){
 				readkey_otp(ekeybuff[i].key, *key_type, M);
 				ekeybuff[i].size=M;
@@ -510,6 +511,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			if(olddkeybuff!=NULL) free(olddkeybuff);
 			olddkeybuff=dkeybuff;
 			dkeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
+			M=nextM;
 			for(int i=0;i<1024;i++){
 				readkey_otp(dkeybuff[i].key, *key_type, M);
 				dkeybuff[i].size=M;
@@ -537,70 +539,6 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 	send(fd, buf, strlen(buf), 0);
 }
 
-// void getsk_handle_bak(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd) {
-// 	//如果双方没有同步加解密密钥池对应关系则首先进行同步
-// 	if (!(encrypt_flag ^ decrypt_flag)) {
-// 		bool ret = key_index_sync();
-// 		if (!ret) {
-// 			perror("key_index_sync error！\n");
-// 			return;
-// 		}
-// 	}
-// 	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
-// 	if (atoi(syn) == 1 && !key_sync_flag) {
-// 		bool ret = key_sync();
-// 		if (!ret) {
-// 			perror("key_sync error!\n");
-// 			return;
-// 		}
-// 	}
-// 	static ekey_lw, ekey_rw, dkey_lw, dkey_rw, olddkey_lw, olddkey_rw;
-// 	//记录首个数据包对应的量子密钥索引以及密钥窗口
-// 	if (atoi(syn) == 1 && *key_type == '0') {
-// 		ekey_sindex = sekeyindex;
-// 	}
-// 	if (atoi(syn) == 1 && *key_type == '1') {
-// 		dkey_sindex = sdkeyindex;
-// 	}
-
-// 	char buf[BUFFLEN], * pb = buf;
-// 	//读取密钥
-// 	if (*key_type == '0') {  //加密密钥
-// 		if (atoi(syn) == 1 || atoi(syn) >= ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
-// 			readkey(raw_ekey, *key_type, keylen);
-// 			//密钥派生参数协商
-// 			bool ret = derive_sync();
-// 			if (!ret) {
-// 				perror("derive_sync error!\n");
-// 				return;
-// 			}
-// 			//更新窗口
-// 			ekey_lw = ekey_rw;
-// 			ekey_rw = ekey_rw + cur_ekeyd;
-// 		}
-// 		derive_key(buf, raw_ekey, syn);
-// 	}
-// 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
-// 		if (atoi(syn) == 1 || atoi(syn) >= dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
-// 			strcpy(raw_olddkey, raw_dkey);
-// 			readkey(raw_dkey, *key_type, keylen);
-// 			//密钥派生参数协商
-// 			//更新窗口
-// 			olddkey_lw = dkey_lw;
-// 			dkey_lw = dkey_rw;
-// 			dkey_rw = dkey_rw + cur_dkeyd;
-// 		}
-// 		if (atoi(syn) < dkey_lw) {
-// 			derive_key(buf, raw_olddkey, syn);
-// 		}
-// 		else if (atoi(syn) >= dkey_lw && atoi(syn) < dkey_rw) {
-// 			derive_key(buf, raw_dkey, syn);
-// 		}
-
-// 	}
-// 	printf("%s\n", buf);
-// 	send(fd, buf, atoi(keylen), 0);
-// }
 
 void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* tsdkeyindex, int fd) {
 
@@ -612,7 +550,6 @@ void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* 
 	sdkeyindex = max(atoi(tsekeyindex), sdkeyindex + delkeyindex) - delkeyindex;
 	//renewkey();
 	key_sync_flag = true;
-	skey_sync_flag = true;
 
 }
 void kisync_handle(const char* encrypt_i, const char* decrypt_i, int fd) {
@@ -675,7 +612,7 @@ void do_recdata(int fd, int epfd) {
 			getk_handle(arg1, arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(method, "getskotp", 8) == 0) {
+		else if (strncasecmp(method, "getotpk", 7) == 0) {
 			getsk_handle_otp(arg1, arg2, arg3, fd);
 			discon(fd, epfd);
 		}
@@ -822,7 +759,7 @@ void* thread_write() {
 }
 int main(int argc, char* argv[]) {
 
-	key_sync_flag = false, skey_sync_flag = false; //密钥同步标志设置为false
+	key_sync_flag = false; //密钥同步标志设置为false
 	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0;  //初始化密钥偏移
 	pthread_rwlock_init(&keywr, NULL); //初始化读写锁
 	encrypt_flag = 0, decrypt_flag = 0; //初始化加解密密钥池对应关系
