@@ -31,7 +31,7 @@
 #define  BUFFLEN 1500 //buf大小
 #define  DF_SERV_PORT 50000 //默认服务器监听端口
 #define  MAX_KEYFILE_SIZE  40960000  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 40M
-#define  KEY_CREATE_RATE  256000  //密钥每秒生成长度 256kbps
+#define  KEY_CREATE_RATE  128000  //密钥每秒生成长度 128kbps
 #define  KEY_UNIT_SIZE    4   //密钥基本存储单位4字节
 #define  KEY_RATIO       1000    //SA密钥与会话密钥的比值
 #define  KEY_FILE   "keyfile.kf"   //密钥文件
@@ -42,6 +42,7 @@
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
+#define  WINSIZE 64 //buffer大小
 
 pthread_rwlock_t keywr;
 bool key_sync_flag;  //密钥同步标志
@@ -59,7 +60,7 @@ typedef struct {
 } Keyblock;
 
 //指定密钥块的初始值128字节
-int M=128,nextM=128;
+int eM=128,nexteM=128,dM=128,nextdM=128;
 
 Keyblock *ekeybuff,*dkeybuff,*olddkeybuff;
 
@@ -486,54 +487,52 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			return;
 		}
 	}
-	static int  ekey_rw=0, dkey_lw=1, dkey_rw=1024, olddkey_lw;
+	static int  ekey_rw=0, dkey_lw=0, dkey_rw=0, olddkey_lw;
 	char buf[BUFFLEN];
 	//读取密钥
 	if (*key_type == '0') {  //加密密钥
-		if (seq == 1 || seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
+		if (seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
 			if(ekeybuff!=NULL) free(ekeybuff);
-			ekeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
-			M=nextM;
-			for(int i=0;i<1024;i++){
+			ekeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
+			eM=nexteM;
+			for(int i=0;i<WINSIZE;i++){
 				readkey_otp(ekeybuff[i].key, *key_type, M);
 				ekeybuff[i].size=M;
 			}
 			//更新窗口
-			if(seq > ekey_rw){
-				ekey_rw = ekey_rw + 1024;
-			}
+			ekey_rw = ekey_rw + WINSIZE;
+
 		}
-		printf("qkey:%s size:%d", ekeybuff[(seq-1)%1024].key, ekeybuff[(seq-1)%1024].size);
-		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%1024].key, ekeybuff[(seq-1)%1024].size);
+		printf("qkey:%s size:%d", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
+		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
-		if (seq == 1 || seq > dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
+		if (seq > dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
 			if(olddkeybuff!=NULL) free(olddkeybuff);
 			olddkeybuff=dkeybuff;
-			dkeybuff=(Keyblock *) malloc(1024*sizeof(Keyblock));
-			M=nextM;
-			for(int i=0;i<1024;i++){
+			dkeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
+			dM=nextdM;
+			for(int i=0;i<WINSIZE;i++){
 				readkey_otp(dkeybuff[i].key, *key_type, M);
 				dkeybuff[i].size=M;
 			}
-			//密钥派生参数协商
+
 			//更新窗口
-			if(seq > dkey_rw){
 			olddkey_lw = dkey_lw;
 			dkey_lw = dkey_rw+1;
-			dkey_rw = dkey_rw + 1024;
-			}
+			dkey_rw = dkey_rw + WINSIZE;
+			
 
 		}
 
 		if (seq < dkey_lw) {
-			printf("qkey:%s size:%d", olddkeybuff[(seq-1)%1024].key, olddkeybuff[(seq-1)%1024].size);
-			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%1024].key, olddkeybuff[(seq-1)%1024].size);
+			printf("qkey:%s size:%d", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
+			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 		}
 		
-		else if (seq >= dkey_lw && seq <= dkey_rw) {
-			printf("qkey:%s size:%d", dkeybuff[(seq-1)%1024].key, dkeybuff[(seq-1)%1024].size);
-			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%1024].key, dkeybuff[(seq-1)%1024].size);
+		else  {
+			printf("qkey:%s size:%d", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
+			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 		}
 	}
 	send(fd, buf, strlen(buf), 0);
@@ -757,6 +756,42 @@ void* thread_write() {
 
 	pthread_exit(0);
 }
+
+void* thread_updateM(){
+	static int pre_ei=0,cur_ei=0;
+	sekeyindex;
+	while(1){
+	int fd, ret, tmp_eM;
+	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
+	sleep(30); //等待30s
+	pre_ei=cur_ei;
+	cur_ei=sekeyindex;
+	int vconsume=(cur_ei-pre_ei)*KEY_UNIT_SIZE/30; //密钥消耗速率，单位 字节/s
+		if(vconsume>=KEY_CREATE_RATE){
+			tmp_eM=(eM/2 >	128)?eM/2:128;			//乘性减少,下界128
+		}
+		else{
+			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
+		}
+	sprintf(buf, "eMsync %d\n", tmp_eM);
+	con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
+	ret = send(fd, buf, strlen(buf), 0);
+		if (ret < 0) {
+			perror("eM_sync connect error!\n");
+			return false;
+		}
+	ret = read(fd, rbuf, sizeof(rbuf));
+	int r_eM;
+	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
+	close(fd);
+		if (tmp_eM == r_eM) {
+			nexteM = tmp_eM;
+		}
+	}
+
+	pthread_exit(0);
+}
+
 int main(int argc, char* argv[]) {
 
 	key_sync_flag = false; //密钥同步标志设置为false
@@ -771,7 +806,7 @@ int main(int argc, char* argv[]) {
 
 	int fd, ar, ret, count = 0, n, i, epfd;
 	struct epoll_event tep, ep[MAXS];
-	pthread_t tid, pid;
+	pthread_t tid[2];
 	char buf[1024], client_ip[1024];
 	if (argc < 2) {
 		perror("Missing parameter\n");
@@ -789,8 +824,10 @@ int main(int argc, char* argv[]) {
 		SERV_PORT = atoi(argv[2]);
 	}
 
-	pthread_create(&tid, NULL, thread_write, NULL);  //密钥写入线程启动
-	pthread_detach(tid); //线程分离
+	pthread_create(&tid[0], NULL, thread_write, NULL);  //密钥写入线程启动
+	pthread_detach(tid[0]); //线程分离
+	pthread_create(&tid[1], NULL, thread_updateM, NULL);  //M更新线程启动
+	pthread_detach(tid[1]); //线程分离
 
 	epoll_run(SERV_PORT); //启动监听服务器，开始监听密钥请求
 
