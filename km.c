@@ -496,14 +496,14 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			ekeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
 			eM=nexteM;
 			for(int i=0;i<WINSIZE;i++){
-				readkey_otp(ekeybuff[i].key, *key_type, M);
-				ekeybuff[i].size=M;
+				readkey_otp(ekeybuff[i].key, *key_type, eM);
+				ekeybuff[i].size=eM;
 			}
 			//更新窗口
 			ekey_rw = ekey_rw + WINSIZE;
 
 		}
-		printf("qkey:%s size:%d", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
+		printf("qkey:%s size:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
@@ -513,8 +513,8 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			dkeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
 			dM=nextdM;
 			for(int i=0;i<WINSIZE;i++){
-				readkey_otp(dkeybuff[i].key, *key_type, M);
-				dkeybuff[i].size=M;
+				readkey_otp(dkeybuff[i].key, *key_type, dM);
+				dkeybuff[i].size=dM;
 			}
 
 			//更新窗口
@@ -526,12 +526,12 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		}
 
 		if (seq < dkey_lw) {
-			printf("qkey:%s size:%d", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
+			printf("qkey:%s size:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 		}
 		
 		else  {
-			printf("qkey:%s size:%d", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
+			printf("qkey:%s size:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 		}
 	}
@@ -568,6 +568,15 @@ void desync_handle(const char* key_d, int fd) {
 	sprintf(buf, "desync %d\n", next_dkeyd);
 	send(fd, buf, strlen(buf), 0);
 }
+
+void eMsync_handle(const char* tmp_eM, int fd) {
+	int tmp_dM = atoi(tmp_eM);
+	nextdM = tmp_dM;
+	char buf[BUFFLEN];
+	sprintf(buf, "eMsync %d\n", nextdM);
+	send(fd, buf, strlen(buf), 0);
+}
+
 void do_recdata(int fd, int epfd) {
 	char buf[BUFFLEN], path[BUFFLEN];
 	int n = get_line(fd, buf, BUFFLEN);
@@ -591,6 +600,7 @@ void do_recdata(int fd, int epfd) {
 		//对应于keysync  arg1=keyindex, arg2=sekeyindex,arg3=sdkeyindex
 		//对应于key_index_sync arg1==encrypt_index, arg2==decrypt_index
 		//对应于derive_sync  arg1==key_d
+		//对应于eM_sync  arg1==tem_eM
 		printf("recieve:%s %s %s %s %s\n", method, arg1, arg2, arg3, arg4);
 		while (1)
 		{
@@ -631,6 +641,10 @@ void do_recdata(int fd, int epfd) {
 			desync_handle(arg1, fd);
 			discon(fd, epfd);
 		}
+		else if (strncasecmp(method, "eMsync", 6) == 0) {
+			eMsync_handle(arg1, fd);
+			discon(fd, epfd);
+		}		
 
 	}
 
@@ -757,6 +771,7 @@ void* thread_write() {
 	pthread_exit(0);
 }
 
+//密钥块大小更新线程
 void* thread_updateM(){
 	static int pre_ei=0,cur_ei=0;
 	sekeyindex;
@@ -767,12 +782,13 @@ void* thread_updateM(){
 	pre_ei=cur_ei;
 	cur_ei=sekeyindex;
 	int vconsume=(cur_ei-pre_ei)*KEY_UNIT_SIZE/30; //密钥消耗速率，单位 字节/s
-		if(vconsume>=KEY_CREATE_RATE){
+		if(vconsume>=KEY_CREATE_RATE/2){
 			tmp_eM=(eM/2 >	128)?eM/2:128;			//乘性减少,下界128
 		}
 		else{
 			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
 		}
+	if(tmp_eM==nexteM)  continue;
 	sprintf(buf, "eMsync %d\n", tmp_eM);
 	con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
 	ret = send(fd, buf, strlen(buf), 0);
