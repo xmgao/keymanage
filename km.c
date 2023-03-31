@@ -358,7 +358,10 @@ void readkey_otp(char* const buf, const char key_type, int size) {
 				//这里加上删除密钥索引
 				if ((sekeyindex+ delkeyindex) % KEY_RATIO != 0 && ((sekeyindex+ delkeyindex) - 1) % KEY_RATIO != 0 && (sekeyindex+ delkeyindex) % 2 == (encrypt_flag)) {
 					fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET);
-					fgets(pb, KEY_UNIT_SIZE + 1, fp);
+					if(fgets(pb, KEY_UNIT_SIZE + 1, fp)==NULL){
+						sleep(1);
+						fgets(pb, KEY_UNIT_SIZE + 1, fp);
+					}
 					i++;
 					pb += KEY_UNIT_SIZE;
 				}
@@ -471,22 +474,22 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 
 void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, int fd) {
 	int seq=atoi(syn);
-	//如果双方没有同步加解密密钥池对应关系则首先进行同步
-	if (!(encrypt_flag ^ decrypt_flag)) {
-		bool ret = key_index_sync();
-		if (!ret) {
-			perror("key_index_sync error！\n");
-			return;
-		}
-	}
-	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
-	if (seq == 1 && !key_sync_flag) {
-		bool ret = key_sync();
-		if (!ret) {
-			perror("key_sync error!\n");
-			return;
-		}
-	}
+	// //如果双方没有同步加解密密钥池对应关系则首先进行同步
+	// if (!(encrypt_flag ^ decrypt_flag)) {
+	// 	bool ret = key_index_sync();
+	// 	if (!ret) {
+	// 		perror("key_index_sync error！\n");
+	// 		return;
+	// 	}
+	// }
+	// //判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
+	// if (seq == 1 && !key_sync_flag) {
+	// 	bool ret = key_sync();
+	// 	if (!ret) {
+	// 		perror("key_sync error!\n");
+	// 		return;
+	// 	}
+	// }
 	static int  ekey_rw=0, dkey_lw=0, dkey_rw=0, olddkey_lw;
 	char buf[BUFFLEN];
 	//读取密钥
@@ -503,7 +506,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			ekey_rw = ekey_rw + WINSIZE;
 
 		}
-		printf("qkey:%s size:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
+		printf("qkey:%s size:%d sei:%d sdi:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
@@ -526,12 +529,12 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		}
 
 		if (seq < dkey_lw) {
-			printf("qkey:%s size:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
+			printf("oldqkey:%s size:%d sei:%d sdi:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 		}
 		
 		else  {
-			printf("qkey:%s size:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
+			printf("qkey:%s size:%d sei:%d sdi:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 		}
 	}
@@ -751,7 +754,6 @@ void* thread_write() {
 			int ret = i % 16;
 			buf[i] = transform(ret);
 		}
-		//renewkey();  先不考虑更新密钥池
 		pthread_rwlock_wrlock(&keywr); //上锁
 		fp = fopen(KEY_FILE, "a+");
 		fseek(fp, 0, SEEK_END); //定位到文件末 
@@ -762,6 +764,9 @@ void* thread_write() {
 			fputs(buf, fp);
 			//printf("%s\n", buf);
 		}
+		// else{
+		// 	renewkey();
+		// }
 		fclose(fp);
 		pthread_rwlock_unlock(&keywr); //解锁
 
@@ -774,13 +779,12 @@ void* thread_write() {
 //密钥块大小更新线程
 void* thread_updateM(){
 	static int pre_ei=0,cur_ei=0;
-	sekeyindex;
 	while(1){
+	sleep(30); //等待10s
 	int fd, ret, tmp_eM;
 	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
-	sleep(30); //等待30s
 	pre_ei=cur_ei;
-	cur_ei=sekeyindex;
+	cur_ei=sekeyindex+delkeyindex;
 	int vconsume=(cur_ei-pre_ei)*KEY_UNIT_SIZE/30; //密钥消耗速率，单位 字节/s
 		if(vconsume>=KEY_CREATE_RATE/2){
 			tmp_eM=(eM/2 >	128)?eM/2:128;			//乘性减少,下界128
