@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<stdlib.h>
+#include<time.h>
 #include<unistd.h>
 #include<pthread.h>
 #include<fcntl.h>
@@ -130,22 +131,41 @@ void do_crecon(int fd, int epfd) {
 
 
 //发起连接 
-void con_serv(int* fd, const char* src, int port) {
-	int  ret, cr;
-	struct sockaddr_in serv_addr, cli_addr;
-	socklen_t client_addr_size;
+bool con_serv(int* fd, const char* src, int port) {
+    int  ret, cr;
+    struct sockaddr_in serv_addr;
+    socklen_t client_addr_size;
 
-	*fd = socket(AF_INET, SOCK_STREAM, 0);
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(SERV_PORT);
-	inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
+    *fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (*fd < 0) {
+        perror("socket error!\n");
+        return false;
+    }
 
-	cr = connect(*fd,(struct sockaddr_in*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
-	if (cr < 0) {
-		perror("key_sync connect error!\n");
-		return ;
-	}
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERV_PORT);
+    inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
+
+    // 设置超时时间
+    struct timeval timeout = {10, 5}; // 5s超时
+    if (setsockopt(*fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt error!\n");
+        return false;
+    }
+    if (setsockopt(*fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt error!\n");
+        return false;
+    }
+
+    cr = connect(*fd,(struct sockaddr_in*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
+    if (cr < 0) {
+        perror("connect error!\n");
+        return false;
+    }
+	return true;
 }
+
+
 //加解密密钥对应关系同步
 bool key_index_sync() {
 	encrypt_flag = 0;
@@ -471,6 +491,50 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	send(fd, buf, strlen(buf), 0);
 }
 
+//密钥块大小更新
+bool updateM(){
+	static clock_t pre_t=0,cur_t=0;
+	if(pre_t==0){
+		pre_t=clock();
+		cur_t=clock();
+		return true;
+	}
+	int fd, ret, tmp_eM;
+	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
+	pre_t=cur_t;
+	cur_t=clock();
+	int vconsume=WINSIZE*eM/(((double)(cur_t-pre_t))/CLOCKS_PER_SEC); //密钥消耗速率，单位 字节/s
+		if(vconsume>=KEY_CREATE_RATE/2){
+			tmp_eM=(eM/2 >	64)?eM/2:64;			//乘性减少,下界128
+		}
+		else{
+			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
+		}
+	//if(tmp_eM==nexteM)  continue;
+	printf("vconsume:%d\n",vconsume);
+	sprintf(buf, "eMsync %d\n", tmp_eM);
+	bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
+	if (ret2 == false ) {
+			perror("eM_sync connect error!\n");
+			return false;
+		}
+	ret = send(fd, buf, strlen(buf), 0);
+	printf("send:%d\n",tmp_eM);
+		if (ret < 0) {
+			perror("eM_sync send error!\n");
+			return false;
+		}
+	ret = read(fd, rbuf, sizeof(rbuf));	
+	int r_eM;
+	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
+	printf("read:%d\n",r_eM);
+	close(fd);
+		if (tmp_eM == r_eM) {
+			nexteM = tmp_eM;
+			return true;
+		}
+	return false;
+}
 
 void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, int fd) {
 	int seq=atoi(syn);
@@ -497,7 +561,12 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		if (seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
 			if(ekeybuff!=NULL) free(ekeybuff);
 			ekeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
+		bool ret = updateM(); //密钥块阈值M同步
+		if (!ret) {
+			perror("deriveM_sync error!\n");
+		}else{
 			eM=nexteM;
+		}			
 			for(int i=0;i<WINSIZE;i++){
 				readkey_otp(ekeybuff[i].key, *key_type, eM);
 				ekeybuff[i].size=eM;
@@ -506,7 +575,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			ekey_rw = ekey_rw + WINSIZE;
 
 		}
-		printf("qkey:%s size:%d sei:%d sdi:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+		//printf("qkey:%s size:%d sei:%d sdi:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
@@ -529,17 +598,18 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		}
 
 		if (seq < dkey_lw) {
-			printf("oldqkey:%s size:%d sei:%d sdi:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+			//printf("oldqkey:%s size:%d sei:%d sdi:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 		}
 		
 		else  {
-			printf("qkey:%s size:%d sei:%d sdi:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+			//printf("qkey:%s size:%d sei:%d sdi:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 		}
 	}
 	send(fd, buf, strlen(buf), 0);
 }
+
 
 
 void keysync_handle(const char* tkeyindex, const char* tsekeyindex, const char* tsdkeyindex, int fd) {
@@ -573,11 +643,13 @@ void desync_handle(const char* key_d, int fd) {
 }
 
 void eMsync_handle(const char* tmp_eM, int fd) {
+	printf("read:%d\n",tmp_eM);
 	int tmp_dM = atoi(tmp_eM);
 	nextdM = tmp_dM;
 	char buf[BUFFLEN];
 	sprintf(buf, "eMsync %d\n", nextdM);
 	send(fd, buf, strlen(buf), 0);
+	printf("send:%d\n",nextdM);
 }
 
 void do_recdata(int fd, int epfd) {
@@ -776,41 +848,6 @@ void* thread_write() {
 	pthread_exit(0);
 }
 
-//密钥块大小更新线程
-void* thread_updateM(){
-	static int pre_ei=0,cur_ei=0;
-	while(1){
-	sleep(30); //等待10s
-	int fd, ret, tmp_eM;
-	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
-	pre_ei=cur_ei;
-	cur_ei=sekeyindex+delkeyindex;
-	int vconsume=(cur_ei-pre_ei)*KEY_UNIT_SIZE/30; //密钥消耗速率，单位 字节/s
-		if(vconsume>=KEY_CREATE_RATE/2){
-			tmp_eM=(eM/2 >	128)?eM/2:128;			//乘性减少,下界128
-		}
-		else{
-			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
-		}
-	if(tmp_eM==nexteM)  continue;
-	sprintf(buf, "eMsync %d\n", tmp_eM);
-	con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
-	ret = send(fd, buf, strlen(buf), 0);
-		if (ret < 0) {
-			perror("eM_sync connect error!\n");
-			return false;
-		}
-	ret = read(fd, rbuf, sizeof(rbuf));
-	int r_eM;
-	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
-	close(fd);
-		if (tmp_eM == r_eM) {
-			nexteM = tmp_eM;
-		}
-	}
-
-	pthread_exit(0);
-}
 
 int main(int argc, char* argv[]) {
 
@@ -846,8 +883,6 @@ int main(int argc, char* argv[]) {
 
 	pthread_create(&tid[0], NULL, thread_write, NULL);  //密钥写入线程启动
 	pthread_detach(tid[0]); //线程分离
-	pthread_create(&tid[1], NULL, thread_updateM, NULL);  //M更新线程启动
-	pthread_detach(tid[1]); //线程分离
 
 	epoll_run(SERV_PORT); //启动监听服务器，开始监听密钥请求
 
