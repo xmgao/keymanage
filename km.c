@@ -97,10 +97,17 @@ int get_line(int cfd, char* buf, int size)
 	return i;
 }
 void discon(int fd, int epfd) {
+	// 	// 查询fd的状态
+	// int flags = fcntl(fd, F_GETFL);
+	// if (flags == -1 && errno == EBADF) {
+	// 	printf("fd is invalid\n");
+	// 	return;
+	// }
+
 	int ret = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
 	if (ret < 0) {
 		perror("EPOLL_CTL_DEL error...\n");
-		exit(1);
+		//exit(1);
 	}
 	close(fd);
 
@@ -110,7 +117,7 @@ void do_crecon(int fd, int epfd) {
 	char cli_ip[16];
 	int client_addr_size, ret;
 	struct epoll_event tep;
-	int ar = accept(fd, (struct sockaddr_in*)(&cli_addr), &client_addr_size);
+	int ar = accept(fd, (struct sockaddr*)(&cli_addr), &client_addr_size);
 	printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)),
 		ntohs(cli_addr.sin_port));
 	//设置ar socket非阻塞
@@ -147,7 +154,7 @@ bool con_serv(int* fd, const char* src, int port) {
     inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
 
     // 设置超时时间
-    struct timeval timeout = {10, 5}; // 5s超时
+    struct timeval timeout = {1, 0}; // 1s超时
     if (setsockopt(*fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
         perror("setsockopt error!\n");
         return false;
@@ -157,7 +164,7 @@ bool con_serv(int* fd, const char* src, int port) {
         return false;
     }
 
-    cr = connect(*fd,(struct sockaddr_in*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
+    cr = connect(*fd,(struct sockaddr*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
     if (cr < 0) {
         perror("connect error!\n");
         return false;
@@ -518,13 +525,30 @@ bool updateM(){
 			perror("eM_sync connect error!\n");
 			return false;
 		}
-	ret = send(fd, buf, strlen(buf), 0);
-	printf("send:%d\n",tmp_eM);
-		if (ret < 0) {
-			perror("eM_sync send error!\n");
-			return false;
-		}
-	ret = read(fd, rbuf, sizeof(rbuf));	
+// 设置超时时间
+struct timeval timeout = {1, 0}; // 1s超时
+setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));		
+
+ret = send(fd, buf, strlen(buf), 0);
+printf("send:%d\n",tmp_eM);
+if (ret < 0) {
+    perror("eM_sync send error!\n");
+    return false;
+}
+
+ret = read(fd, rbuf, sizeof(rbuf));
+if (ret < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // 如果是超时，处理超时的情况
+        printf("Timeout on fd %d\n", fd);
+		return false;
+    } else {
+        perror("eM_sync read error!\n");
+        return false;
+    }
+}
+
 	int r_eM;
 	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
 	printf("read:%d\n",r_eM);
@@ -643,7 +667,7 @@ void desync_handle(const char* key_d, int fd) {
 }
 
 void eMsync_handle(const char* tmp_eM, int fd) {
-	printf("read:%d\n",tmp_eM);
+	printf("receive:%s\n",tmp_eM);
 	int tmp_dM = atoi(tmp_eM);
 	nextdM = tmp_dM;
 	char buf[BUFFLEN];
@@ -653,6 +677,15 @@ void eMsync_handle(const char* tmp_eM, int fd) {
 }
 
 void do_recdata(int fd, int epfd) {
+
+	// 查询fd的状态
+	int flags = fcntl(fd, F_GETFL);
+	if (flags == -1 && errno == EBADF) {
+		printf("fd is invalid\n");
+		discon(fd, epfd);
+		return;
+	}
+
 	char buf[BUFFLEN], path[BUFFLEN];
 	int n = get_line(fd, buf, BUFFLEN);
 	if (n < 0) {
@@ -742,7 +775,7 @@ int init_listen(int port, int epfd) {
 	int opt = 1;
 	setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-	int br = bind(lfd, (struct sockaddr_in*)&serv_addr, sizeof(serv_addr));
+	int br = bind(lfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 	if (br < 0) {
 		perror("bind error!\n");
 		exit(1);
