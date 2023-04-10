@@ -1,6 +1,6 @@
 #include<stdio.h>
 #include<stdlib.h>
-#include<time.h>
+#include <sys/time.h>
 #include<unistd.h>
 #include<pthread.h>
 #include<fcntl.h>
@@ -500,24 +500,24 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 
 //密钥块大小更新
 bool updateM(){
-	static clock_t pre_t=0,cur_t=0;
-	if(pre_t==0){
-		pre_t=clock();
-		cur_t=clock();
+	static struct timeval pre_t, cur_t;
+	if(pre_t.tv_sec==0){
+		gettimeofday(&pre_t, NULL);
+		gettimeofday(&cur_t, NULL);
 		return true;
 	}
 	int fd, ret, tmp_eM;
 	char buf[BUFFLEN], rbuf[BUFFLEN], method[32];
 	pre_t=cur_t;
-	cur_t=clock();
-	int vconsume=WINSIZE*eM/(((double)(cur_t-pre_t))/CLOCKS_PER_SEC); //密钥消耗速率，单位 字节/s
+	gettimeofday(&cur_t, NULL);
+	double duration = (cur_t.tv_sec - pre_t.tv_sec) + (cur_t.tv_usec - pre_t.tv_usec) / 1000000.0;
+	int vconsume=WINSIZE*eM/duration; //密钥消耗速率，单位 字节/s
 		if(vconsume>=KEY_CREATE_RATE/2){
 			tmp_eM=(eM/2 >	64)?eM/2:64;			//乘性减少,下界128
 		}
 		else{
 			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
 		}
-	//if(tmp_eM==nexteM)  continue;
 	printf("vconsume:%d\n",vconsume);
 	sprintf(buf, "eMsync %d\n", tmp_eM);
 	bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
@@ -526,14 +526,14 @@ bool updateM(){
 			return false;
 		}
 // 设置超时时间
-struct timeval timeout = {1, 0}; // 1s超时
+struct timeval timeout = {3, 0}; // 3s超时
 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));		
 
 ret = send(fd, buf, strlen(buf), 0);
-printf("send:%d\n",tmp_eM);
+printf("send:%d\tfd:%d\n",tmp_eM,fd);
 if (ret < 0) {
-    perror("eM_sync send error!\n");
+    printf("eM_sync send error!\n");
     return false;
 }
 
@@ -542,9 +542,11 @@ if (ret < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
         // 如果是超时，处理超时的情况
         printf("Timeout on fd %d\n", fd);
+		close(fd);
 		return false;
     } else {
-        perror("eM_sync read error!\n");
+        printf("eM_sync read error!\n");
+		close(fd);
         return false;
     }
 }
@@ -552,7 +554,29 @@ if (ret < 0) {
 	int r_eM;
 	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
 	printf("read:%d\n",r_eM);
-	close(fd);
+
+	//二次确认，若没有这一步说明发生阻塞，已经关闭连接
+	sprintf(buf, "eMsync ACK message\n");
+	ret = send(fd, buf, strlen(buf), 0);
+	printf("eM_sync sendACK\n");
+	if (ret < 0) {
+		printf("eM_sync sendACK error!\n");
+		return false;
+	}
+	ret = read(fd, rbuf, sizeof(rbuf));
+	if (ret < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        // 如果是超时，处理超时的情况
+        printf("Timeout on fd %d\n", fd);
+		close(fd);
+		return false;
+    } else {
+        printf("eM_sync read error!\n");
+		close(fd);
+        return false;
+    }
+	printf("eM_sync getACK !\n");
+	}
 		if (tmp_eM == r_eM) {
 			nexteM = tmp_eM;
 			return true;
@@ -570,14 +594,14 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 	// 		return;
 	// 	}
 	// }
-	// //判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
-	// if (seq == 1 && !key_sync_flag) {
-	// 	bool ret = key_sync();
-	// 	if (!ret) {
-	// 		perror("key_sync error!\n");
-	// 		return;
-	// 	}
-	// }
+	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
+	if (seq == 1 && !key_sync_flag) {
+		bool ret = key_sync();
+		if (!ret) {
+			perror("key_sync error!\n");
+			return;
+		}
+	}
 	static int  ekey_rw=0, dkey_lw=0, dkey_rw=0, olddkey_lw;
 	char buf[BUFFLEN];
 	//读取密钥
@@ -599,7 +623,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			ekey_rw = ekey_rw + WINSIZE;
 
 		}
-		//printf("qkey:%s size:%d sei:%d sdi:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+		printf("qkey:%s size:%d sei:%d sdi:%d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
@@ -622,12 +646,12 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		}
 
 		if (seq < dkey_lw) {
-			//printf("oldqkey:%s size:%d sei:%d sdi:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+			printf("oldqkey:%s size:%d sei:%d sdi:%d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", olddkeybuff[(seq-1)%WINSIZE].key, olddkeybuff[(seq-1)%WINSIZE].size);
 		}
 		
 		else  {
-			//printf("qkey:%s size:%d sei:%d sdi:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
+			printf("qkey:%s size:%d sei:%d sdi:%d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size, sekeyindex, sdkeyindex);
 			sprintf(buf, "%s %d\n", dkeybuff[(seq-1)%WINSIZE].key, dkeybuff[(seq-1)%WINSIZE].size);
 		}
 	}
@@ -666,15 +690,46 @@ void desync_handle(const char* key_d, int fd) {
 	send(fd, buf, strlen(buf), 0);
 }
 
+
 void eMsync_handle(const char* tmp_eM, int fd) {
-	printf("receive:%s\n",tmp_eM);
-	int tmp_dM = atoi(tmp_eM);
-	nextdM = tmp_dM;
-	char buf[BUFFLEN];
-	sprintf(buf, "eMsync %d\n", nextdM);
-	send(fd, buf, strlen(buf), 0);
-	printf("send:%d\n",nextdM);
+	int flags = fcntl(fd, F_GETFL);
+	if (flags == -1 && errno == EBADF) {
+    printf("fd is invalid\n");
+    discon(fd, epfd);
+    return;
+	}
+
+    printf("receive:%s\n",tmp_eM);
+    int tmp_dM = atoi(tmp_eM);
+    char buf[BUFFLEN],rbuf[BUFFLEN];
+    sprintf(buf, "dMsync %d\n", tmp_dM);
+    send(fd, buf, strlen(buf), 0);
+    printf("send:%d\tfd:%d\n",tmp_dM,fd);
+    // 设置超时时间
+    struct timeval timeout = {3, 0}; // 3s超时
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	int ret = read(fd, rbuf, strlen(rbuf));
+	if (ret < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			// 如果是超时，处理超时的情况
+			printf("Timeout on fd %d\n", fd);
+			return;
+		} else {
+			printf("eM_sync GETACK error!\n");
+			return;
+		}
+	} else if (ret == 0) {
+		// 如果对端已经关闭了连接，需要关闭本端的连接并退出
+		printf("Connection closed by peer on fd %d\n", fd);
+		return;
+	}
+    printf("receive ACK!\n");
+	sprintf(buf, "eMsync ACK message!\n");
+    send(fd, buf, strlen(buf), 0);
+    nextdM = tmp_dM;
 }
+
 
 void do_recdata(int fd, int epfd) {
 
@@ -751,6 +806,10 @@ void do_recdata(int fd, int epfd) {
 		}
 		else if (strncasecmp(method, "eMsync", 6) == 0) {
 			eMsync_handle(arg1, fd);
+			discon(fd, epfd);
+		}
+		else{
+			printf("invalid recdata\n");
 			discon(fd, epfd);
 		}		
 
