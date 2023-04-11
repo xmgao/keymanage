@@ -43,7 +43,7 @@
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
-#define  WINSIZE 64 //buffer大小
+#define  WINSIZE 128 //buffer大小
 
 pthread_rwlock_t keywr;
 bool key_sync_flag;  //密钥同步标志
@@ -153,16 +153,16 @@ bool con_serv(int* fd, const char* src, int port) {
     serv_addr.sin_port = htons(SERV_PORT);
     inet_pton(AF_INET, src, &serv_addr.sin_addr.s_addr);
 
-    // 设置超时时间
-    struct timeval timeout = {1, 0}; // 1s超时
-    if (setsockopt(*fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt error!\n");
-        return false;
-    }
-    if (setsockopt(*fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        perror("setsockopt error!\n");
-        return false;
-    }
+    // // 设置超时时间
+    // struct timeval timeout = {1, 0}; // 1s超时
+    // if (setsockopt(*fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+    //     perror("setsockopt error!\n");
+    //     return false;
+    // }
+    // if (setsockopt(*fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+    //     perror("setsockopt error!\n");
+    //     return false;
+    // }
 
     cr = connect(*fd,(struct sockaddr*)(&serv_addr), sizeof(serv_addr)); //连接对方服务器
     if (cr < 0) {
@@ -563,37 +563,23 @@ if (ret < 0) {
 		printf("eM_sync sendACK error!\n");
 		return false;
 	}
-	ret = read(fd, rbuf, sizeof(rbuf));
-	if (ret < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        // 如果是超时，处理超时的情况
-        printf("Timeout on fd %d\n", fd);
-		close(fd);
-		return false;
-    } else {
-        printf("eM_sync read error!\n");
-		close(fd);
-        return false;
-    }
-	printf("eM_sync getACK !\n");
+	if (tmp_eM == r_eM) {
+		nexteM = tmp_eM;
+		return true;
 	}
-		if (tmp_eM == r_eM) {
-			nexteM = tmp_eM;
-			return true;
-		}
 	return false;
 }
 
 void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, int fd) {
 	int seq=atoi(syn);
-	// //如果双方没有同步加解密密钥池对应关系则首先进行同步
-	// if (!(encrypt_flag ^ decrypt_flag)) {
-	// 	bool ret = key_index_sync();
-	// 	if (!ret) {
-	// 		perror("key_index_sync error！\n");
-	// 		return;
-	// 	}
-	// }
+	//如果双方没有同步加解密密钥池对应关系则首先进行同步
+	if (!(encrypt_flag ^ decrypt_flag)) {
+		bool ret = key_index_sync();
+		if (!ret) {
+			perror("key_index_sync error！\n");
+			return;
+		}
+	}
 	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
 	if (seq == 1 && !key_sync_flag) {
 		bool ret = key_sync();
@@ -695,39 +681,36 @@ void eMsync_handle(const char* tmp_eM, int fd) {
 	int flags = fcntl(fd, F_GETFL);
 	if (flags == -1 && errno == EBADF) {
     printf("fd is invalid\n");
-    discon(fd, epfd);
     return;
 	}
-
     printf("receive:%s\n",tmp_eM);
     int tmp_dM = atoi(tmp_eM);
     char buf[BUFFLEN],rbuf[BUFFLEN];
     sprintf(buf, "dMsync %d\n", tmp_dM);
     send(fd, buf, strlen(buf), 0);
     printf("send:%d\tfd:%d\n",tmp_dM,fd);
-    // 设置超时时间
-    struct timeval timeout = {3, 0}; // 3s超时
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-	int ret = read(fd, rbuf, strlen(rbuf));
-	if (ret < 0) {
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
-			// 如果是超时，处理超时的情况
-			printf("Timeout on fd %d\n", fd);
-			return;
-		} else {
-			printf("eM_sync GETACK error!\n");
-			return;
-		}
-	} else if (ret == 0) {
-		// 如果对端已经关闭了连接，需要关闭本端的连接并退出
-		printf("Connection closed by peer on fd %d\n", fd);
-		return;
+	int retries = 0;
+	while (retries < 10) {  // 最多重试10次
+    int ret = read(fd, rbuf, strlen(rbuf));
+    if (ret < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            // 等待一段时间后重试
+            usleep(100000);  // 100毫秒
+            retries++;
+            continue;
+        } else {
+            // 其他错误
+            printf("eM_sync GETACK error! Error code: %d, Error message: %s\n", errno, strerror(errno));
+            return;
+        }
+    }
+	else {
+        printf("read:%s \tld:%ld\n",rbuf,strlen(rbuf));
+		printf("receive ACK!\n");
+    	nextdM = tmp_dM;
+		return ;
+    }
 	}
-    printf("receive ACK!\n");
-	sprintf(buf, "eMsync ACK message!\n");
-    send(fd, buf, strlen(buf), 0);
-    nextdM = tmp_dM;
 }
 
 
