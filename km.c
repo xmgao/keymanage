@@ -53,6 +53,7 @@ int SERV_PORT;  //服务器监听端口
 int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;   //记录当前的密钥派生参数和下一个密钥派生参数
 char  raw_ekey[64];//记录原始量子密钥
 char remote_ip[32];  //记录远程ip地址
+int	next_dM[3000]={0};
 
 //用于OTP的密钥块结构体
 typedef struct {
@@ -499,7 +500,7 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 }
 
 //密钥块大小更新
-bool updateM(){
+bool updateM(int seq){
 	static struct timeval pre_t, cur_t;
 	if(pre_t.tv_sec==0){
 		gettimeofday(&pre_t, NULL);
@@ -519,19 +520,19 @@ bool updateM(){
 			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
 		}
 	printf("vconsume:%d\n",vconsume);
-	sprintf(buf, "eMsync %d\n", tmp_eM);
+	sprintf(buf, "eMsync %d %d\n", tmp_eM,seq);
 	bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
 	if (ret2 == false ) {
 			perror("eM_sync connect error!\n");
 			return false;
 		}
 // 设置超时时间
-struct timeval timeout = {3, 0}; // 3s超时
+struct timeval timeout = {2, 0}; // 2s超时
 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));		
 
 ret = send(fd, buf, strlen(buf), 0);
-printf("send:%d\tfd:%d\n",tmp_eM,fd);
+printf("send:%d\tnextseq:%d\tfd:%d\n",tmp_eM,seq,fd);
 if (ret < 0) {
     printf("eM_sync send error!\n");
     return false;
@@ -563,6 +564,7 @@ if (ret < 0) {
 		printf("eM_sync sendACK error!\n");
 		return false;
 	}
+	close(fd);
 	if (tmp_eM == r_eM) {
 		nexteM = tmp_eM;
 		return true;
@@ -581,13 +583,13 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		}
 	}
 	//判断syn是否为1，是则进行同步，否则不需要同步,同时接收方的key_sync_flag会被设置为true，避免二次同步
-	if (seq == 1 && !key_sync_flag) {
-		bool ret = key_sync();
-		if (!ret) {
-			perror("key_sync error!\n");
-			return;
-		}
-	}
+	// if (seq == 1 && !key_sync_flag) {
+	// 	bool ret = key_sync();
+	// 	if (!ret) {
+	// 		perror("key_sync error!\n");
+	// 		return;
+	// 	}
+	// }
 	static int  ekey_rw=0, dkey_lw=0, dkey_rw=0, olddkey_lw;
 	char buf[BUFFLEN];
 	//读取密钥
@@ -595,7 +597,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		if (seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
 			if(ekeybuff!=NULL) free(ekeybuff);
 			ekeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
-		bool ret = updateM(); //密钥块阈值M同步
+		bool ret = updateM(seq); //密钥块阈值M同步
 		if (!ret) {
 			perror("deriveM_sync error!\n");
 		}else{
@@ -617,7 +619,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			if(olddkeybuff!=NULL) free(olddkeybuff);
 			olddkeybuff=dkeybuff;
 			dkeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
-			dM=nextdM;
+			dM=next_dM[seq/WINSIZE]!=0?next_dM[seq/WINSIZE]:dM;
 			for(int i=0;i<WINSIZE;i++){
 				readkey_otp(dkeybuff[i].key, *key_type, dM);
 				dkeybuff[i].size=dM;
@@ -677,13 +679,13 @@ void desync_handle(const char* key_d, int fd) {
 }
 
 
-void eMsync_handle(const char* tmp_eM, int fd) {
+void eMsync_handle(const char* tmp_eM,const char* nextseq, int fd) {
 	int flags = fcntl(fd, F_GETFL);
 	if (flags == -1 && errno == EBADF) {
     printf("fd is invalid\n");
     return;
 	}
-    printf("receive:%s\n",tmp_eM);
+    printf("receive:%s\tnextseq:%s\n",tmp_eM,nextseq);
     int tmp_dM = atoi(tmp_eM);
     char buf[BUFFLEN],rbuf[BUFFLEN];
     sprintf(buf, "dMsync %d\n", tmp_dM);
@@ -695,7 +697,7 @@ void eMsync_handle(const char* tmp_eM, int fd) {
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
             // 等待一段时间后重试
-            usleep(100000);  // 100毫秒
+            usleep(50000);  // 50毫秒
             retries++;
             continue;
         } else {
@@ -705,9 +707,9 @@ void eMsync_handle(const char* tmp_eM, int fd) {
         }
     }
 	else {
-        printf("read:%s \tld:%ld\n",rbuf,strlen(rbuf));
+        //printf("read:%s \tld:%ld\n",rbuf,strlen(rbuf));
 		printf("receive ACK!\n");
-    	nextdM = tmp_dM;
+    	next_dM[atoi(nextseq)/WINSIZE] = tmp_dM;
 		return ;
     }
 	}
@@ -746,7 +748,7 @@ void do_recdata(int fd, int epfd) {
 		//对应于keysync  arg1=keyindex, arg2=sekeyindex,arg3=sdkeyindex
 		//对应于key_index_sync arg1==encrypt_index, arg2==decrypt_index
 		//对应于derive_sync  arg1==key_d
-		//对应于eM_sync  arg1==tem_eM
+		//对应于eM_sync  arg1==tem_eM arg2==nextseq
 		printf("recieve:%s %s %s %s %s\n", method, arg1, arg2, arg3, arg4);
 		while (1)
 		{
@@ -788,7 +790,7 @@ void do_recdata(int fd, int epfd) {
 			discon(fd, epfd);
 		}
 		else if (strncasecmp(method, "eMsync", 6) == 0) {
-			eMsync_handle(arg1, fd);
+			eMsync_handle(arg1, arg2, fd);
 			discon(fd, epfd);
 		}
 		else{
