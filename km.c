@@ -31,10 +31,10 @@
 #define  MAXS 1024  //最大监听数量
 #define  BUFFLEN 1500 //buf大小
 #define  DF_SERV_PORT 50000 //默认服务器监听端口
-#define  MAX_KEYFILE_SIZE  40960000  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 40M
-#define  KEY_CREATE_RATE  128000  //密钥每秒生成长度 128kbps
+#define  MAX_KEYFILE_SIZE  40971520  //最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 40M
+#define  KEY_CREATE_RATE  131072  //密钥每秒生成长度 128kBps
 #define  KEY_UNIT_SIZE    4   //密钥基本存储单位4字节
-#define  KEY_RATIO       1000    //SA密钥与会话密钥的比值
+#define  KEY_RATIO       10000    //SA密钥与会话密钥的比值
 #define  KEY_FILE   "keyfile.kf"   //密钥文件
 #define  TEMPKEY_FILE   "tempkeyfile.kf"   //密钥文件
 #define  REMOTE_IPADDR "127.0.0.1"   //对方服务器的ip地址
@@ -43,7 +43,8 @@
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
-#define  WINSIZE 128 //buffer大小
+#define  WINSIZE 1024 //buffer大小
+#define seed 666 //设置密钥随机数种子
 
 pthread_rwlock_t keywr;
 bool key_sync_flag;  //密钥同步标志
@@ -53,7 +54,7 @@ int SERV_PORT;  //服务器监听端口
 int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;   //记录当前的密钥派生参数和下一个密钥派生参数
 char  raw_ekey[64];//记录原始量子密钥
 char remote_ip[32];  //记录远程ip地址
-int	next_dM[3000]={0};
+int	next_dM[10000]={0};
 
 //用于OTP的密钥块结构体
 typedef struct {
@@ -202,7 +203,7 @@ bool key_index_sync() {
 void renewkey() {
 	//int delkeyindex, keyindex, sekeyindex, sdkeyindex
 	int delindex; 	//要删除的密钥的索引
-	pthread_rwlock_wrlock(&keywr); //上锁
+	//pthread_rwlock_wrlock(&keywr); //上锁
 	delindex = min(sdkeyindex, sekeyindex);
 	if (delindex == 0) {
 		return;
@@ -236,7 +237,7 @@ void renewkey() {
 	else {
 		perror("rename error!");
 	}
-	pthread_rwlock_unlock(&keywr); //解锁
+	//pthread_rwlock_unlock(&keywr); //解锁
 }
 
 //密钥同步,本地与远端服务器建立连接同步密钥偏移
@@ -387,7 +388,7 @@ void readkey_otp(char* const buf, const char key_type, int size) {
 				if ((sekeyindex+ delkeyindex) % KEY_RATIO != 0 && ((sekeyindex+ delkeyindex) - 1) % KEY_RATIO != 0 && (sekeyindex+ delkeyindex) % 2 == (encrypt_flag)) {
 					fseek(fp, sekeyindex * KEY_UNIT_SIZE, SEEK_SET);
 					if(fgets(pb, KEY_UNIT_SIZE + 1, fp)==NULL){
-						sleep(1);
+						sleep(2);
 						fgets(pb, KEY_UNIT_SIZE + 1, fp);
 					}
 					i++;
@@ -416,25 +417,6 @@ void readkey_otp(char* const buf, const char key_type, int size) {
 	pthread_rwlock_unlock(&keywr); //解锁
 }
 
-//派生密钥函数
-// void derive_key(char* const buf, const char* raw_key, const char* syn) {
-// 	strcpy(buf, raw_key);
-// 	//strcat(buf, syn);
-// 	//unsigned char sha1[SHA_DIGEST_LENGTH];
-// 	//SHA1(buf, strlen(buf), sha1);
-// 	//strcpy(buf, sha1);
-
-// 	/*
-// 	char* p1 = buf, * p2 = syn;
-// 	while (*p1 != ' ' && *p2 != ' ') {
-// 		*p1 = *p1 ^ *p2;
-// 		p1++;
-// 		p2++;
-// 	}
-// 	*/
-
-// 	//strcat(buf, syn);
-// }
 
 
 //sa密钥请求处理
@@ -527,7 +509,7 @@ bool updateM(int seq){
 			return false;
 		}
 // 设置超时时间
-struct timeval timeout = {2, 0}; // 2s超时
+struct timeval timeout = {1, 0}; // 1s超时
 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));		
 
@@ -692,7 +674,7 @@ void eMsync_handle(const char* tmp_eM,const char* nextseq, int fd) {
     send(fd, buf, strlen(buf), 0);
     printf("send:%d\tfd:%d\n",tmp_dM,fd);
 	int retries = 0;
-	while (retries < 10) {  // 最多重试10次
+	while (retries < 5) {  // 最多重试5次
     int ret = read(fd, rbuf, strlen(rbuf));
     if (ret < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -894,13 +876,11 @@ void* thread_write() {
 	remove(KEY_FILE);
 	printf("key supply starting...\n");
 	//模拟不断写入密钥到密钥池文件
+	int count=0; //计数器，用来触发密钥池更新
 	while (1) {
 		char buf[KEY_CREATE_RATE];
-		int i = 0;
-		srand((unsigned int)time(NULL));
-		for (; i < KEY_CREATE_RATE; i++) { //随机形成密钥串
-			//srand((unsigned int)time(NULL));
-			int ret = i % 16;
+		for (int i = 0; i < KEY_CREATE_RATE; i++) { //随机形成密钥串
+			int ret =rand()%16;
 			buf[i] = transform(ret);
 		}
 		pthread_rwlock_wrlock(&keywr); //上锁
@@ -913,12 +893,13 @@ void* thread_write() {
 			fputs(buf, fp);
 			//printf("%s\n", buf);
 		}
-		// else{
-		// 	renewkey();
-		// }
 		fclose(fp);
+		// if (nFileLen >= MAX_KEYFILE_SIZE && count >=30) { //密钥池满且更新时间超过30s
+		// 	renewkey();
+		// 	count=0;
+		// }
 		pthread_rwlock_unlock(&keywr); //解锁
-
+		count++;
 		sleep(1); //等待1s
 	}
 
@@ -927,7 +908,7 @@ void* thread_write() {
 
 
 int main(int argc, char* argv[]) {
-
+	srand(seed);
 	key_sync_flag = false; //密钥同步标志设置为false
 	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0;  //初始化密钥偏移
 	pthread_rwlock_init(&keywr, NULL); //初始化读写锁
