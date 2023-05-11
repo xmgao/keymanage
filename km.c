@@ -43,7 +43,7 @@
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
-#define  WINSIZE 1024 //buffer大小
+#define  WINSIZE 64 //buffer大小
 #define seed 666 //设置密钥随机数种子
 
 pthread_rwlock_t keywr;
@@ -496,7 +496,7 @@ bool updateM(int seq){
 	double duration = (cur_t.tv_sec - pre_t.tv_sec) + (cur_t.tv_usec - pre_t.tv_usec) / 1000000.0;
 	int vconsume=WINSIZE*eM/duration; //密钥消耗速率，单位 字节/s
 		if(vconsume>=KEY_CREATE_RATE/2){
-			tmp_eM=(eM/2 >	64)?eM/2:64;			//乘性减少,下界128
+			tmp_eM=(eM/2 >	64)?eM/2:64;			//乘性减少,下界64
 		}
 		else{
 			tmp_eM=(eM+128 < 1024)?eM+128:1024;				//加性增加，上界1024
@@ -509,7 +509,7 @@ bool updateM(int seq){
 			return false;
 		}
 // 设置超时时间
-struct timeval timeout = {1, 0}; // 1s超时
+struct timeval timeout = {0, 300000}; // 0.3s超时
 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));		
 
@@ -597,6 +597,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 		sprintf(buf, "%s %d\n", ekeybuff[(seq-1)%WINSIZE].key, ekeybuff[(seq-1)%WINSIZE].size);
 	}
 	else {  //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
+		loop:
 		if (seq > dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
 			if(olddkeybuff!=NULL) free(olddkeybuff);
 			olddkeybuff=dkeybuff;
@@ -611,7 +612,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			olddkey_lw = dkey_lw;
 			dkey_lw = dkey_rw+1;
 			dkey_rw = dkey_rw + WINSIZE;
-			
+			goto loop;
 
 		}
 
