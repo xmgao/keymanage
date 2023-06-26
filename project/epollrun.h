@@ -38,7 +38,7 @@
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
-#define  WINSIZE 1024 //buffer大小
+#define  WINSIZE 2048 //buffer大小
 
 // 本地监听初始化
 int init_listen_local(int port, int epfd);

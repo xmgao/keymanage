@@ -189,7 +189,7 @@ void do_recdata_local(int fd, int epfd){
         // 处理读取到的数据
         if (buffer[bytesRead-1] == '\n') 
             buffer[bytesRead-1] = '\0';    
-        printf("recieve:%s\n", buffer);
+        //printf("recieve:%s\n", buffer);
         //对应于getk   arg1==spi, arg2=keylen(字节)
 		//对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype
 		//对应于getskotp  arg1==spi, arg2=syn,arg3=keytype
@@ -262,7 +262,6 @@ void do_recdata_external(int fd, int epfd){
 		}
 		else if (strncasecmp(method, "eMsync", 6) == 0) {
 			eMsync_handle(arg1, arg2, fd);
-			discon(fd, epfd);
 		}
         else{
             printf("invalid recdata:%s\n",buffer);
@@ -494,6 +493,31 @@ void getsk_handle(const char* spi, const char* keylen, const char* syn, const ch
 	send(fd, buf, strlen(buf), 0);
 }
 
+
+int establish_connection() {
+	static int socket_fd = -1; // 静态变量用于保存套接字的文件描述符
+    if (socket_fd == -1) {
+        // 第一次调用，创建套接字
+        socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (socket_fd == -1) {
+            perror("Failed to create socket");
+            // 处理套接字创建失败的情况
+			return -1;
+        }
+        // 可以在这里进行套接字的初始化配置
+		struct sockaddr_in serv_addr;
+		serv_addr.sin_family = AF_INET;
+		serv_addr.sin_port = htons(SERV_PORT);	// 设置服务器端口号
+		inet_pton(AF_INET, remote_ip, &serv_addr.sin_addr.s_addr);// 设置服务器IP地址
+		int connect_result = connect(socket_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+		if (connect_result == -1) {
+			perror("eM_sync connect error!\n");
+			return -1;
+    	}
+		}
+    return socket_fd;
+}
+
 //密钥块大小更新
 bool updateM(int seq){
 	static struct timeval pre_t, cur_t;
@@ -514,13 +538,18 @@ bool updateM(int seq){
 		else{
 			tmp_eM=(eM+16 < 128)?eM+16:128;				//加性增加，上界128字节
 		}
-	//printf("vconsume:%d\n",vconsume);
 	sprintf(buf, "eMsync %d %d\n", tmp_eM,seq);
-	bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
-	if (ret2 == false ) {
-			//printf("eM_sync connect error!\n");
-			return false;
-		}
+	// bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
+	// if (ret2 == false ) {
+	// 		//printf("eM_sync connect error!\n");
+	// 		return false;
+	// 	}
+	fd=establish_connection();
+	if (fd == -1) {
+	// 处理建立连接失败的情况
+	perror("establish_connection error!\n");
+	return false;
+	}
 // 设置超时时间
 struct timeval timeout = {0, 300000}; // 0.3s超时
 setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
@@ -538,11 +567,9 @@ if (ret < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
         // 如果是超时，处理超时的情况
         printf("Timeout on fd %d\n", fd);
-		close(fd);
 		return false;
     } else {
         printf("eM_sync read error!\n");
-		close(fd);
         return false;
     }
 }
@@ -585,7 +612,7 @@ void getsk_handle_otp(const char* spi,  const char* syn, const char* key_type, i
 			ekeybuff=(Keyblock *) malloc(WINSIZE*sizeof(Keyblock));
 		bool ret = updateM(seq); //密钥块阈值M同步
 		if (!ret) {
-			//printf("deriveM_sync error!\n");
+			printf("deriveM_sync error!\n");
 		}else{
 			eM=nexteM;
 		}			
@@ -865,10 +892,10 @@ void keyfile_write() {
 }
 
 int main(int argc, char* argv[]) {
-	remove(KEY_FILE);
-    //初始一块密钥
-    for(int i=0;i<10;i++)
-	    keyfile_write();
+	// remove(KEY_FILE);
+    // //初始一块密钥
+    // for(int i=0;i<10;i++)
+	//     keyfile_write();
 
 	key_sync_flag = false; //密钥同步标志设置为false
 	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0;  //初始化密钥偏移
@@ -878,7 +905,6 @@ int main(int argc, char* argv[]) {
 	next_ekeyd = INIT_KEYD;
 	cur_dkeyd = INIT_KEYD;  //初始化密钥派生参数
 	next_dkeyd = INIT_KEYD;
-	//raw_ekey = NULL, prived_ekey = NULL;  //初始化加密密钥
 
 
 	char buf[1024], client_ip[1024];
