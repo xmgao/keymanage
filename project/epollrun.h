@@ -20,9 +20,8 @@
 #include <dirent.h>
 #include<math.h>
 
-#define MAX_EVENTS 10
-#define BUFFER_SIZE 1024
-#define BUFFLEN 1500
+#define MAX_EVENTS 10   //最大监听数量
+#define BUFFER_SIZE 1024    //数据包缓冲区最大长度
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define  LOCAL_PORT 50000 //默认服务器内部监听端口
@@ -32,13 +31,14 @@
 #define  KEY_UNIT_SIZE    4   //密钥基本存储单位4字节
 #define  KEY_RATIO       1000    //SA密钥与会话密钥的比值
 #define  KEY_FILE   "keyfile.kf"   //密钥文件
-#define  REMOTE_IPADDR "127.0.0.1"   //对方服务器的ip地址
+#define  TEMPKEY_FILE   "tempkeyfile.kf"   //临时密钥文件
+#define  LOCAL_IPADDR "127.0.0.1"   //本地ip地址
 #define  INIT_KEYD   10000 //初始密钥派生参数
 #define  up_index  2  //派生增长因子
 #define  down_index  0.1  //派生减少因子
 #define  Th1  0.7   //上界
 #define  Th2  0.3	//下界
-#define  WINSIZE 2048 //buffer大小
+#define  WINSIZE 4096 //密钥窗口大小
 
 // 本地监听初始化
 int init_listen_local(int port, int epfd);
@@ -79,7 +79,7 @@ void getk_handle(const char* spi, const char* keylen, int fd);
 //会话密钥请求处理
 void getsk_handle(const char* spi, const char* keylen, const char* syn, const char* key_type, int fd);
 
-//密钥块大小更新
+//分组密钥阈值更新
 bool updateM(int seq);
 
 //otp密钥请求处理
