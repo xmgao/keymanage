@@ -362,7 +362,7 @@ bool derive_sync() {
 
 	return false;
 }
-/*
+
 //更新密钥池，更新删除密钥索引
 void renewkey() {
 	//int delkeyindex, keyindex, sekeyindex, sdkeyindex
@@ -403,7 +403,7 @@ void renewkey() {
 	}
 	//pthread_rwlock_unlock(&keywr); //解锁
 }
-
+/*
 //密钥写入线程
 void* thread_write() {
 	//首先定义文件指针：fp
@@ -611,11 +611,6 @@ bool updateM(int seq){
 			tmp_eM=(eM+16 < 128)?eM+16:128;				//加性增加，上界128字节
 		}
 	sprintf(buf, "eMsync %d %d\n", tmp_eM,seq);
-	// bool ret2= con_serv(&fd, remote_ip, SERV_PORT); //连接对方服务器
-	// if (ret2 == false ) {
-	// 		//printf("eM_sync connect error!\n");
-	// 		return false;
-	// 	}
 	fd=establish_connection();
 	if (fd == -1) {
 	// 处理建立连接失败的情况
@@ -904,11 +899,10 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
         printf("无法打开文件夹！\n");
         return;
     }
-
     // 保存文件名的数组
     const int maxFiles = 1000; // 最大文件数
-    const int maxFileNameLength = 50; // 文件名的最大长度
-    const char **fileNames = malloc(maxFiles * sizeof(const char *));
+    const int maxFileNameLength = 256; // 文件名的最大长度
+    char **fileNames = (char **)malloc(maxFiles * sizeof(char *));
     int numFiles = 0;
 
     while ((entry = readdir(dir)) != NULL) {
@@ -917,23 +911,22 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
 
         char filePath[maxFileNameLength];
         sprintf(filePath, "%s/%s", folderPath, entry->d_name);
-
         if (entry->d_type == DT_DIR) {
             readFilesInFolder(filePath,fp);
         } else {
             // 将文件名添加到数组中
-            fileNames[numFiles] = strdup(entry->d_name);
+			fileNames[numFiles] = (char *)malloc(sizeof(char)*maxFileNameLength);
+            strcpy(fileNames[numFiles],entry->d_name);
             numFiles++;
         }
     }
-
     closedir(dir);
 
 		//numFiles==1;等待然后跳转
 	if(numFiles<=1) 
-	{
+	{	
 		sleep(2);
-		free((void *)fileNames[0]);
+		free(fileNames[0]);
 		free(fileNames);
 		return ;
 	}
@@ -944,24 +937,26 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
     // 打印排序后的文件名
     for (int i = 0; i < numFiles-1; i++) {
         printf("filename:%s\n", fileNames[i]);
-        char kfilePath[100]; // 文件路径
+        char kfilePath[256]; // 文件路径
         sprintf(kfilePath, "%s/%s", folderPath,fileNames[i]);
          FILE *file = fopen(kfilePath, "r");
             if (file) {
-                char buffer[1025];
-                while (fgets(buffer, sizeof(buffer), file)) {
-                    fputs(buffer, fp);
-                }
+				 char buffer[1024];
+    			size_t bytesRead;
+    			while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        			fwrite(buffer, 1, bytesRead, fp);
+    			}
                 fclose(file);
 				//删除密钥文件
 				remove(kfilePath);
 
             }
-        free((void *)fileNames[i]);
+        free(fileNames[i]);
     }
 
     free(fileNames);
 }
+
 
 //密钥写入
 void keyfile_write() {
