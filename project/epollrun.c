@@ -411,23 +411,34 @@ void* thread_write() {
 	remove(KEY_FILE);
 	printf("key supply starting...\n");
 	//模拟不断写入密钥到密钥池文件
+	int count=0; //计数器，用来触发密钥池更新
 	while (1) {
-		unsigned char buf[KEY_CREATE_RATE];
+		unsigned char* buf=(unsigned char *)malloc(KEY_CREATE_RATE*sizeof(unsigned char));
 		int i = 0;
 		srand(666);
 		for (; i < KEY_CREATE_RATE; i++) { //随机形成密钥串
 			int ret = rand()%256;
 			buf[i] = ret;
 		}
+		pthread_rwlock_wrlock(&keywr); //上锁
 		fp = fopen(KEY_FILE, "a+");
 		fseek(fp, 0, SEEK_END); //定位到文件末 
 		int nFileLen = ftell(fp); //文件长度
 		fseek(fp, 0, SEEK_SET); //恢复到文件头
 		//判断文件大小，若文件大于设定的值则不再写入
+		float poolsize=(float)(nFileLen-KEY_UNIT_SIZE*(sekeyindex+sdkeyindex)/2)/1024;
+		printf("keypoolsize:%.2f KByetes\n",poolsize);
 		if (nFileLen < MAX_KEYFILE_SIZE) {
 			fputs(buf, fp);
 		}
+		free(buf);
 		fclose(fp);
+		if (nFileLen >= MAX_KEYFILE_SIZE && count >=30) { //密钥池满且更新时间超过30s
+			renewkey();
+			count=0;
+		}
+		pthread_rwlock_unlock(&keywr); //解锁
+		count++;
 		sleep(1); //等待1s
 	}
 
