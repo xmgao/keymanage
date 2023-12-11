@@ -35,7 +35,7 @@
 #define KEY_CREATE_RATE 1024 * 16		  // 密钥每秒生成长度 128kbps
 #define KEY_UNIT_SIZE 4					  // 密钥基本存储单位4字节
 #define KEY_RATIO 1000					  // SA密钥与会话密钥的比值
-#define KEY_FILE "keyfile.kf"			  // 密钥文件
+#define KEY_FILE "keyfile.kf"			  // dh,psk密钥文件
 #define TEMPKEY_FILE "tempkeyfile.kf"	  // 临时密钥文件
 #define LOCAL_IPADDR "127.0.0.1"		  // 本地ip地址
 #define INIT_KEYD 100					  // 初始密钥派生参数
@@ -43,16 +43,63 @@
 #define down_index 500					  // 派生减少因子
 #define LT 0.2							  // 下界
 #define WINSIZE 4096					  // 密钥窗口大小
+#define MAX_DYNAMIC_SPI_COUNT 100		 //最多同时存在SPI个数
 
-pthread_rwlock_t keywr;
-bool key_sync_flag;								   // 密钥同步标志
-int delkeyindex, keyindex, sekeyindex, sdkeyindex; // 密钥索引，用于删除过期密钥，标识当前的sa密钥,加密密钥，解密密钥
-int encrypt_flag, decrypt_flag;					   // 加密密钥以及解密密钥的对应关系，0标识加密密钥，1标识解密密钥
-int SERV_PORT;									   // 服务器监听端口
-int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;  // 记录当前的密钥派生参数和下一个密钥派生参数
-char raw_ekey[64];								   // 记录原始量子密钥
-char remote_ip[32];								   // 记录远程ip地址
-int next_dM[10000] = {0};						   // 解密密钥窗口大小的本地缓存，可以用%10000做循环
+//解密派生参数队列
+#define MAX_QUEUE_SIZE 100
+
+typedef struct {
+    int data[MAX_QUEUE_SIZE];
+    int front;
+    int rear;
+} Queue;
+
+// 初始化队列
+void initializeQueue(Queue *queue) {
+    queue->front = -1;
+    queue->rear = -1;
+}
+
+// 检查队列是否为空
+int isEmpty(Queue *queue) {
+    return (queue->front == -1 && queue->rear == -1);
+}
+
+// 检查队列是否已满
+int isFull(Queue *queue) {
+    return ((queue->rear + 1) % MAX_QUEUE_SIZE == queue->front);
+}
+
+// 入队
+void enqueue(Queue *queue, int value) {
+    if (isFull(queue)) {
+        printf("Queue is full. Cannot enqueue.\n");
+        return;
+    } else if (isEmpty(queue)) {
+        queue->front = 0;
+        queue->rear = 0;
+    } else {
+        queue->rear = (queue->rear + 1) % MAX_QUEUE_SIZE;
+    }
+    queue->data[queue->rear] = value;
+}
+
+// 出队
+int dequeue(Queue *queue) {
+    int value;
+    if (isEmpty(queue)) {
+        printf("Queue is empty. Cannot dequeue.\n");
+        return -1; // 代表出队失败
+    } else if (queue->front == queue->rear) {
+        value = queue->data[queue->front];
+        queue->front = -1;
+        queue->rear = -1;
+    } else {
+        value = queue->data[queue->front];
+        queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
+    }
+    return value;
+}
 
 // 用于OTP的密钥块结构体
 typedef struct
@@ -61,10 +108,30 @@ typedef struct
 	int size;
 } Keyblock;
 
-// 指定密钥块的初始值16字节
-int eM = 16, nexteM = 16, dM = 16, nextdM = 16;
 
-Keyblock *ekeybuff, *dkeybuff, *olddkeybuff;
+// 结构体定义，存储与每个SPI相关的参数
+typedef struct {
+    int spi;											//出站SPI
+	bool in_bound;										//true如果是入站SPI
+	char keyfile[100]; 									//spi对应的密钥池文件名
+	bool key_sync_flag;								   // 密钥同步标志
+	int delkeyindex, keyindex, sekeyindex, sdkeyindex; // 密钥索引，用于删除过期密钥，标识当前的sa密钥,加密密钥，解密密钥
+	int encrypt_flag, decrypt_flag;					   // 加密密钥以及解密密钥的对应关系，0标识加密密钥，1标识解密密钥
+	int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;  // 记录当前的密钥派生参数和下一个密钥派生参数
+	char raw_ekey[64],raw_dkey[64],old_dkey[64];	 // 记录原始量子密钥
+	Queue myQueue; //解密参数队列
+	// 指定密钥块的初始值16字节
+	int eM,nexteM,dM;
+	Keyblock *ekeybuff, *dkeybuff, *olddkeybuff;
+} SpiParams;
+
+SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
+
+int spiCount = 0; //当前SPI个数
+pthread_rwlock_t keywr;
+int SERV_PORT;									   // 服务器监听端口
+char remote_ip[32];								   // 记录远程ip地址
+
 
 // 本地监听初始化
 int init_listen_local(int port, int epfd);
@@ -310,6 +377,7 @@ void do_recdata_local(int fd, int epfd)
 		// 对应于getk   arg1==spi, arg2=keylen(字节)
 		// 对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype
 		// 对应于getotpk arg1==spi, arg2=syn,arg3=keytype
+		// 对应于spiregister arg1==spi, arg2=inbound
 		uint8_t method[32] = {}, path[256] = {}, protocol[16] = {}, arg1[64] = {}, arg2[64] = {}, arg3[64] = {}, arg4[64] = {};
 		int key_type;
 		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", method, arg1, arg2, arg3, arg4);
@@ -325,6 +393,11 @@ void do_recdata_local(int fd, int epfd)
 		else if (strncasecmp(method, "getsk", 5) == 0)
 		{
 			getsk_handle(arg1, arg2, arg3, arg4, fd);
+		}
+		else if (strncasecmp(method, "spiregister", 11) == 0)
+		{
+			spiregister_handle(arg1, arg2, fd);
+			discon(fd, epfd);
 		}
 		else
 		{
@@ -715,10 +788,11 @@ void getk_handle(const char *spi, const char *keylen, int fd)
 
 // 会话密钥请求处理
 // 目前窗口放在strongswan里，超过窗口大小时才调用处理函数，减少通信
+//修改后，窗口还是放在kms里
 void getsk_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd)
-{
+{	
+	int seq=atoi(syn);
 	// 如果双方没有同步加解密密钥池对应关系则首先进行同步
-	int range = 0;
 	if (!(encrypt_flag ^ decrypt_flag))
 	{
 		bool ret = key_index_sync();
@@ -738,37 +812,41 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			return;
 		}
 	}
-
+	static int  ekey_rw=0, dkey_lw=0, dkey_rw=0, olddkey_lw;
 	char buf[BUFFER_SIZE];
-	if (*key_type == '0')
-	{
+	if (*key_type == '0'){	
+		if (seq > ekey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要进行派生参数同步
 		bool ret = derive_sync(); // 派生参数同步
 		if (!ret)
 		{
 			perror("derive_sync error!\n");
 			return;
 		}
-		readkey(raw_ekey, *key_type, atoi(keylen)); // 读取密钥
-		// printf("qkey:");
-		// for (int i = 0; i < strlen(raw_ekey); i++)
-		// {
-		// 	printf("%02x", raw_ekey[i]);
-		// }
-		printf("	kdp:%d sei:%d sdi:%d \n", cur_ekeyd, sekeyindex, sdkeyindex);
+			readkey(raw_ekey, *key_type, atoi(keylen)); // 读取密钥
+			ekey_rw = ekey_rw + cur_ekeyd;
+		}
+		//printf("kdp:%d sei:%d sdi:%d \n", cur_ekeyd, sekeyindex, sdkeyindex);
 		sprintf(buf, "%s %d\n", raw_ekey, cur_ekeyd);
 	}
-	else
+	else //解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
 	{
-		readkey(raw_ekey, *key_type, atoi(keylen)); // 读取密钥
-		// printf("qkey:");
-		// for (int i = 0; i < strlen(raw_ekey); i++)
-		// {
-		// 	printf("%02x", raw_ekey[i]);
-		// }
-		printf("	kdp:%d sei:%d sdi:%d \n", cur_ekeyd, sekeyindex, sdkeyindex);
-		sprintf(buf, "%s %d\n", raw_ekey, cur_dkeyd);
-	}
+		loop:
+		if (seq > dkey_rw) {  //如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,
+			memcpy(old_dkey,raw_dkey,atoi(keylen));
+			readkey(raw_dkey, *key_type, atoi(keylen)); // 读取密钥
+			//更新窗口
+			dkey_lw = dkey_rw+1;
+			dkey_rw = dkey_rw + dequeue(&myQueue);//正确的解密派生参数由一个队列管理
+			goto loop;
 
+		}
+		if (seq < dkey_lw) {
+			sprintf(buf, "%s %d\n", old_dkey, cur_dkeyd);
+		}
+		else  {
+			sprintf(buf, "%s %d\n", raw_dkey, cur_dkeyd);
+		}
+	}
 	send(fd, buf, strlen(buf), 0);
 }
 
@@ -832,10 +910,6 @@ bool updateM(int seq)
 		perror("establish_connection error!\n");
 		return false;
 	}
-	// 设置超时时间
-	struct timeval timeout = {1, 0}; // 1s超时
-	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
 	ret = send(fd, buf, strlen(buf), 0);
 	printf("send:%d\tnextseq:%d\tfd:%d\n", tmp_eM, seq, fd);
@@ -848,17 +922,8 @@ bool updateM(int seq)
 	ret = read(fd, rbuf, sizeof(rbuf));
 	if (ret < 0)
 	{
-		if (errno == EAGAIN || errno == EWOULDBLOCK)
-		{
-			// 如果是超时，处理超时的情况
-			printf("Timeout on fd %d\n", fd);
-			return false;
-		}
-		else
-		{
 			printf("eM_sync read error!\n");
 			return false;
-		}
 	}
 	int r_eM;
 	sscanf(rbuf, "%[^ ] %d", method, &r_eM);
@@ -935,7 +1000,7 @@ void getsk_handle_otp(const char *spi, const char *syn, const char *key_type, in
 				free(olddkeybuff);
 			olddkeybuff = dkeybuff;
 			dkeybuff = (Keyblock *)malloc(WINSIZE * sizeof(Keyblock));
-			dM = next_dM[seq / WINSIZE] != 0 ? next_dM[seq / WINSIZE] : dM;
+			dM = dequeue(&myQueue);
 			for (int i = 0; i < WINSIZE; i++)
 			{
 				readkey(dkeybuff[i].key, *key_type, dM);
@@ -962,6 +1027,37 @@ void getsk_handle_otp(const char *spi, const char *syn, const char *key_type, in
 		}
 	}
 	send(fd, buf, strlen(buf), 0);
+}
+
+void spiregister_handle(int spi,bool inbound){
+	// 假设通过某种方式检测到新的SPI
+    int newSPI = spi;
+    // 动态分配内存，并存储新的SPI参数
+    dynamicSPI[spiCount] = (SpiParams *)malloc(sizeof(SpiParams));
+    if (dynamicSPI[spiCount] != NULL) {
+        dynamicSPI[spiCount]->spi = newSPI;
+        // 初始化其他与SPI相关的参数
+		//如果是入站SPI，需要初始化解密参数
+		key_sync_flag = false;										   // 密钥同步标志设置为false
+		delkeyindex = 0, keyindex = 0; 	// 初始化密钥偏移
+		if(inbound){
+			initializeQueue(&(dynamicSPI[spiCount]->myQueue));
+			decrypt_flag = 1;							   // 初始化解密密钥池
+			cur_dkeyd = INIT_KEYD; // 初始化密钥派生参数
+			next_dkeyd = INIT_KEYD;
+		}
+		else{
+														 // 初始化加密密钥池
+			cur_ekeyd = INIT_KEYD;										   // 初始化密钥派生参数
+			next_ekeyd = INIT_KEYD;
+		}
+
+        spiCount++; // 更新计数器
+    } else {
+        printf("Memory allocation failed for new SPI.\n");
+    }
+
+
 }
 
 // 密钥索引同步请求处理
@@ -995,6 +1091,7 @@ void desync_handle(const char *key_d, int fd)
 	int tmp_keyd = atoi(key_d);
 	cur_dkeyd = next_dkeyd;
 	next_dkeyd = tmp_keyd;
+	enqueue(&myQueue, cur_dkeyd);
 	char buf[BUFFER_SIZE];
 	sprintf(buf, "desync %d\n", next_dkeyd);
 	send(fd, buf, strlen(buf), 0);
@@ -1014,7 +1111,7 @@ void eMsync_handle(const char *tmp_eM, const char *nextseq, int fd)
 	int tmp_dM = atoi(tmp_eM);
 	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE];
 	sprintf(buf, "dMsync %d\n", tmp_dM);
-	next_dM[atoi(nextseq) / WINSIZE] = tmp_dM;
+	enqueue(&myQueue, tmp_dM);
 	send(fd, buf, strlen(buf), 0);
 	return;
 }
@@ -1133,17 +1230,12 @@ void epoll_run(int port)
 	pthread_join(tid, NULL);
 }
 
-int main(int argc, char *argv[])
-{
 
-	key_sync_flag = false;										   // 密钥同步标志设置为false
-	delkeyindex = 0, keyindex = 0, sekeyindex = 0, sdkeyindex = 0; // 初始化密钥偏移
+int main(int argc, char *argv[])
+{	
+
+
 	pthread_rwlock_init(&keywr, NULL);							   // 初始化读写锁
-	encrypt_flag = 0, decrypt_flag = 0;							   // 初始化加解密密钥池对应关系
-	cur_ekeyd = INIT_KEYD;										   // 初始化密钥派生参数
-	next_ekeyd = INIT_KEYD;
-	cur_dkeyd = INIT_KEYD; // 初始化密钥派生参数
-	next_dkeyd = INIT_KEYD;
 
 	pthread_t tid[2];
 	char buf[1024], client_ip[1024];
@@ -1167,5 +1259,8 @@ int main(int argc, char *argv[])
 	pthread_detach(tid[0]);							   // 线程分离
 	epoll_run(SERV_PORT);							   // 启动监听服务器，开始监听密钥请求
 	pthread_rwlock_destroy(&keywr);					   // 销毁读写锁
+	for (int i = 0; i < spiCount; ++i) {
+        free(dynamicSPI[i]);
+    }
 	return 0;
 }
