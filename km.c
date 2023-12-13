@@ -1,3 +1,14 @@
+/*
+ * @Author: xmgao dearlanxing@mail.ustc.edu.cn
+ * @Date: 2023-03-30 15:42:44
+ * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
+ * @LastEditTime: 2023-12-13 14:53:44
+ * @FilePath: \c\keymanage\km.c
+ * @Description: 
+ * 
+ * Copyright (c) 2023 by ${git_name_email}, All Rights Reserved. 
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/socket.h>
@@ -29,6 +40,7 @@
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define LOCAL_PORT 50000				  // 默认服务器内部监听端口
+#define socket_path "/tmp/my_socket"	//定义本地套接字路径
 #define EXTERNAL_PORT 50001				  // 默认服务器外部监听端口
 #define MAX_KEYFILE_SIZE 1024 * 1024 * 2 // 最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 2M
 #define MAX_KEYPOOL_SIZE (MAX_KEYFILE_SIZE/2) // 最大密钥池大小，用来判断密钥派生参数
@@ -44,6 +56,7 @@
 #define LT 0.2							  // 下界
 #define WINSIZE 4096					  // 密钥窗口大小
 #define MAX_DYNAMIC_SPI_COUNT 100		 //最多同时存在SPI个数
+#define INIT_KEYM 16					//初始密钥块阈值16字节
 
 //解密派生参数队列
 #define MAX_QUEUE_SIZE 100
@@ -71,6 +84,12 @@ int isFull(Queue *queue) {
 }
 
 // 入队
+/**
+ * @description: 
+ * @param {Queue} *queue
+ * @param {int} value
+ * @return {*}
+ */
 void enqueue(Queue *queue, int value) {
     if (isFull(queue)) {
         printf("Queue is full. Cannot enqueue.\n");
@@ -104,26 +123,25 @@ int dequeue(Queue *queue) {
 // 用于OTP的密钥块结构体
 typedef struct
 {
-	char key[1024];
+	char key[1500];
 	int size;
 } Keyblock;
 
-
+typedef struct SpiParams SpiParams;
 // 结构体定义，存储与每个SPI相关的参数
-typedef struct {
+struct SpiParams {
     int spi;											//出站SPI
 	bool in_bound;										//true如果是入站SPI
 	char keyfile[100]; 									//spi对应的密钥池文件名
 	bool key_sync_flag;								   // 密钥同步标志
-	int delkeyindex, keyindex, sekeyindex, sdkeyindex; // 密钥索引，用于删除过期密钥，标识当前的sa密钥,加密密钥，解密密钥
-	int encrypt_flag, decrypt_flag;					   // 加密密钥以及解密密钥的对应关系，0标识加密密钥，1标识解密密钥
+	int delkeyindex, keyindex; 							// 密钥索引，用于删除过期密钥，标识当前的密钥
+	int encrypt_flag;					   // 加密密钥以及解密密钥的对应关系，0标识加密，1标识解密
 	int cur_ekeyd, next_ekeyd, cur_dkeyd, next_dkeyd;  // 记录当前的密钥派生参数和下一个密钥派生参数
 	char raw_ekey[64],raw_dkey[64],old_dkey[64];	 // 记录原始量子密钥
 	Queue myQueue; //解密参数队列
-	// 指定密钥块的初始值16字节
-	int eM,nexteM,dM;
+	int eM,dM;
 	Keyblock *ekeybuff, *dkeybuff, *olddkeybuff;
-} SpiParams;
+};
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
 
@@ -134,13 +152,15 @@ char remote_ip[32];								   // 记录远程ip地址
 
 
 // 本地监听初始化
-int init_listen_local(int port, int epfd);
+int init_listen_local(int epfd);
 
 // 外部监听初始化
 int init_listen_external(int port, int epfd);
 
-// 处理连接
-void do_crecon(int fd, int epfd);
+// 处理tcp连接
+void do_tcpcrecon(int fd, int epfd);
+
+// 处理unix连接
 
 // 关闭连接
 void discon(int fd, int epfd);
@@ -151,8 +171,8 @@ void do_recdata_local(int fd, int epfd);
 // 处理外部事件
 void do_recdata_external(int fd, int epfd);
 
-// 发起连接
-bool con_serv(int *fd, const char *src, int port);
+// 发起tcp连接
+bool con_tcpserv(int *fd, const char *src, int port);
 
 // 加解密密钥对应关系同步
 bool key_index_sync();
@@ -190,56 +210,49 @@ void desync_handle(const char *key_d, int fd);
 // 密钥块阈值同步
 void eMsync_handle(const char *tmp_eM, const char *nextseq, int fd);
 
-int init_listen_local(int port, int epfd)
-{
-	int lfd, ret;
-	struct epoll_event tep;
-	struct sockaddr_in serv_addr;
-	socklen_t client_addr_size;
+int init_listen_local(int epfd) {
+    int unix_sock, ret;
+    struct epoll_event tep;
 
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_port = htons(port);
+    struct sockaddr_un serv_addr;
 
-	// 本地监听
-	inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr.s_addr);
+    // 创建 UNIX 域套接字
+    unix_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (unix_sock < 0) {
+        perror("socket create error!\n");
+        exit(1);
+    }
+    // 设置套接字地址信息
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, socket_path, sizeof(serv_addr.sun_path) - 1);
 
-	lfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (lfd < 0)
-	{
-		perror("socket create error!\n");
-		exit(1);
-	}
+    // 绑定 UNIX 域套接字
+    ret = bind(unix_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+    if (ret < 0) {
+        perror("bind error!\n");
+        exit(1);
+    }
 
-	int opt = 1;
-	setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    listen(unix_sock, 128);
 
-	int br = bind(lfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
-	if (br < 0)
-	{
-		perror("bind error!\n");
-		exit(1);
-	}
+    tep.events = EPOLLIN;
+    tep.data.fd = unix_sock;
+    ret = epoll_ctl(epfd, EPOLL_CTL_ADD, unix_sock, &tep);
+    if (ret == -1) {
+        perror("epoll_ctl_add error!\n");
+        exit(1);
+    }
 
-	listen(lfd, 128);
-
-	tep.events = EPOLLIN;
-	tep.data.fd = lfd;
-	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, lfd, &tep);
-	if (ret == -1)
-	{
-		perror("epoll_ctl_add error!\n");
-		exit(1);
-	}
-
-	return lfd;
+    return unix_sock;
 }
 
+//TODO
 int init_listen_external(int port, int epfd)
 {
 	int lfd, ret;
 	struct epoll_event tep;
 	struct sockaddr_in serv_addr;
-	socklen_t client_addr_size;
 
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(port);
@@ -276,13 +289,11 @@ int init_listen_external(int port, int epfd)
 	return lfd;
 }
 
-// 发起连接
-bool con_serv(int *fd, const char *src, int port)
+// 发起tcp连接
+bool con_tcpserv(int *fd, const char *src, int port)
 {
 	int ret, cr;
 	struct sockaddr_in serv_addr;
-	socklen_t client_addr_size;
-
 	*fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (*fd < 0)
 	{
@@ -303,8 +314,32 @@ bool con_serv(int *fd, const char *src, int port)
 	return true;
 }
 
+//创建 UNIX 域套接字连接
+bool con_unixserv(int *fd) {
+    int ret, cr;
+    *fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (*fd < 0) {
+        perror("socket error!\n");
+        return false;
+    }
+
+    struct sockaddr_un serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, socket_path, sizeof(serv_addr.sun_path) - 1);
+
+    cr = connect(*fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)); // 连接对方服务器
+    if (cr < 0) {
+        perror("connect error!\n");
+        return false;
+    }
+    return true;
+}
+
+
+
 // 处理连接请求
-void do_crecon(int fd, int epfd)
+void do_tcpcrecon(int fd, int epfd)
 {
 	struct sockaddr_in cli_addr;
 	char cli_ip[16];
@@ -329,10 +364,35 @@ void do_crecon(int fd, int epfd)
 	}
 }
 
-// 关闭连接
+//处理 UNIX 域套接字连接请求
+void do_unixcrecon(int fd, int epfd) {
+    struct sockaddr_un cli_addr;
+    int client_addr_size, ret;
+    struct epoll_event tep;
+    int ar = accept(fd, (struct sockaddr *)&cli_addr, &client_addr_size);
+    printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
+
+    // 设置 ar socket 非阻塞
+    int flag = fcntl(ar, F_GETFL);
+    flag |= O_NONBLOCK;
+    fcntl(ar, F_SETFL, flag);
+
+    // 事件赋值
+    tep.events = EPOLLIN;
+    tep.data.fd = ar;
+
+    // 事件上树
+    ret = epoll_ctl(epfd, EPOLL_CTL_ADD, ar, &tep);
+    if (ret == -1) {
+        perror("epoll_ctl_add error!\n");
+        exit(1);
+    }
+}
+
+
+// 关闭tcp或unix连接
 void discon(int fd, int epfd)
 {
-
 	int ret = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
 	if (ret < 0)
 	{
@@ -341,35 +401,19 @@ void discon(int fd, int epfd)
 	}
 	close(fd);
 }
-
-void do_recdata_local(int fd, int epfd)
-{
-
-	// 查询fd的状态
-	int flags = fcntl(fd, F_GETFL);
-	if (flags == -1 && errno == EBADF)
-	{
-		printf("fd is invalid\n");
-		discon(fd, epfd);
-		return;
-	}
-
-	char buffer[BUFFER_SIZE];
-	// sockfd 上有数据到达
-	ssize_t bytesRead = read(fd, buffer, BUFFER_SIZE);
-	if (bytesRead == -1)
-	{
-		perror("Failed to read data from sockfd");
-		exit(EXIT_FAILURE);
-	}
-	else if (bytesRead == 0)
-	{
-		// 连接关闭，进行相应处理
-		close(fd);
-		// exit(EXIT_SUCCESS);
-	}
-	else
-	{
+void do_recdata_unix(int fd, int epfd) {
+    char buffer[BUFFER_SIZE];
+    ssize_t bytesRead = read(fd, buffer, BUFFER_SIZE);
+    if (bytesRead == -1) {
+        perror("Failed to read data from socket");
+        exit(EXIT_FAILURE);
+    } else if (bytesRead == 0) {
+        // 连接关闭，进行相应处理
+        discon(fd, epfd);
+    } else {
+        // 在这里处理从 UNIX 域套接字中读取的数据
+        // 可以根据需求对读取到的数据进行处理
+        printf("Received data from socket: %s\n", buffer);
 		// 处理读取到的数据
 		if (buffer[bytesRead - 1] == '\n')
 			buffer[bytesRead - 1] = '\0';
@@ -410,14 +454,6 @@ void do_recdata_local(int fd, int epfd)
 void do_recdata_external(int fd, int epfd)
 {
 
-	// 查询fd的状态
-	int flags = fcntl(fd, F_GETFL);
-	if (flags == -1 && errno == EBADF)
-	{
-		printf("fd is invalid\n");
-		discon(fd, epfd);
-		return;
-	}
 
 	char buffer[BUFFER_SIZE];
 	// sockfd 上有数据到达
@@ -430,8 +466,7 @@ void do_recdata_external(int fd, int epfd)
 	else if (bytesRead == 0)
 	{
 		// 连接关闭，进行相应处理
-		close(fd);
-		// exit(EXIT_SUCCESS);
+		discon(fd, epfd);
 	}
 	else
 	{
@@ -481,7 +516,7 @@ bool key_index_sync()
 	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], kis[16];
 	int fd, ret, tencrypt_index, tdecrypt_index;
 
-	con_serv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
+	con_tcpserv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
 	printf("encrypt_flag:%d decrypt_flag:%d\n", encrypt_flag, decrypt_flag);
 	sprintf(buf, "kisync %d %d\n", encrypt_flag, decrypt_flag);
 	send(fd, buf, strlen(buf), 0);
@@ -504,11 +539,9 @@ bool key_sync()
 
 	int fd, ret;
 	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
-	// struct sockaddr_in serv_addr, cli_addr;
-	// socklen_t client_addr_size;
 	sprintf(buf, "keysync di:%d ei:%d di:%d\n", keyindex + delkeyindex, sekeyindex + delkeyindex, sdkeyindex + delkeyindex);
 
-	con_serv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
+	con_tcpserv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
 
 	ret = send(fd, buf, strlen(buf), 0);
 	if (ret < 0)
@@ -570,7 +603,7 @@ bool derive_sync()
 
 	sprintf(buf, "desync %d\n", tmp_keyd);
 
-	con_serv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
+	con_tcpserv(&fd, remote_ip, SERV_PORT); // 连接对方服务器
 	ret = send(fd, buf, strlen(buf), 0);
 	if (ret < 0)
 	{
@@ -931,7 +964,7 @@ bool updateM(int seq)
 
 	if (tmp_eM == r_eM)
 	{
-		nexteM = tmp_eM;
+		eM = tmp_eM;
 		return true;
 	}
 	return false;
@@ -972,14 +1005,6 @@ void getsk_handle_otp(const char *spi, const char *syn, const char *key_type, in
 				free(ekeybuff);
 			ekeybuff = (Keyblock *)malloc(WINSIZE * sizeof(Keyblock));
 			bool ret = updateM(seq); // 密钥块阈值M同步
-			if (!ret)
-			{
-				printf("deriveM_sync error!\n");
-			}
-			else
-			{
-				eM = nexteM;
-			}
 			for (int i = 0; i < WINSIZE; i++)
 			{
 				readkey(ekeybuff[i].key, *key_type, eM);
@@ -1034,24 +1059,28 @@ void spiregister_handle(int spi,bool inbound){
     int newSPI = spi;
     // 动态分配内存，并存储新的SPI参数
     dynamicSPI[spiCount] = (SpiParams *)malloc(sizeof(SpiParams));
+
+	char hexStr[20]; // 足够大的字符数组来存储转换后的字符串
+	sprintf(hexStr, "%x", spi); // 将数字转换为十六进制字符串
+	strcpy(dynamicSPI[spiCount]->keyfile, hexStr);							   // 用SPI初始化密钥池
     if (dynamicSPI[spiCount] != NULL) {
         dynamicSPI[spiCount]->spi = newSPI;
         // 初始化其他与SPI相关的参数
 		//如果是入站SPI，需要初始化解密参数
-		key_sync_flag = false;										   // 密钥同步标志设置为false
-		delkeyindex = 0, keyindex = 0; 	// 初始化密钥偏移
+		 dynamicSPI[spiCount]->key_sync_flag = false;										   // 密钥同步标志设置为false
+		 dynamicSPI[spiCount]->delkeyindex = 0,dynamicSPI[spiCount]->keyindex = 0; 	// 初始化密钥偏移
+
 		if(inbound){
 			initializeQueue(&(dynamicSPI[spiCount]->myQueue));
-			decrypt_flag = 1;							   // 初始化解密密钥池
-			cur_dkeyd = INIT_KEYD; // 初始化密钥派生参数
-			next_dkeyd = INIT_KEYD;
+			 dynamicSPI[spiCount]->cur_dkeyd = INIT_KEYD; // 初始化密钥派生参数
+			 dynamicSPI[spiCount]->next_dkeyd = INIT_KEYD;
+			 dynamicSPI[spiCount]->eM=INIT_KEYM;
 		}
 		else{
-														 // 初始化加密密钥池
-			cur_ekeyd = INIT_KEYD;										   // 初始化密钥派生参数
-			next_ekeyd = INIT_KEYD;
+			 dynamicSPI[spiCount]->cur_ekeyd = INIT_KEYD;										   // 初始化密钥派生参数
+			 dynamicSPI[spiCount]->next_ekeyd = INIT_KEYD;
+			 dynamicSPI[spiCount]->dM=INIT_KEYM;
 		}
-
         spiCount++; // 更新计数器
     } else {
         printf("Memory allocation failed for new SPI.\n");
@@ -1070,7 +1099,6 @@ void keysync_handle(const char *tkeyindex, const char *tsekeyindex, const char *
 	keyindex = max(atoi(tkeyindex), keyindex + delkeyindex) - delkeyindex; // 修改
 	sekeyindex = max(atoi(tsdkeyindex), sekeyindex + delkeyindex) - delkeyindex;
 	sdkeyindex = max(atoi(tsekeyindex), sdkeyindex + delkeyindex) - delkeyindex;
-	// renewkey();
 	key_sync_flag = true;
 }
 
@@ -1150,7 +1178,7 @@ void *thread_function(void *arg)
 			{
 				// 处理本地连接逻辑
 				printf("local_connection success!\n");
-				do_crecon(local_lfd, epfd);
+				do_unixcrecon(local_lfd, epfd);
 			}
 			else if (events[i].events & EPOLLIN)
 			{
@@ -1212,7 +1240,7 @@ void epoll_run(int port)
 			{
 				// 处理外部连接请求
 				printf("\nexternal_connection success!\n"); // ...
-				do_crecon(external_lfd, epfd1);
+				do_tcpcrecon(external_lfd, epfd1);
 			}
 			else if (events1[i].events & EPOLLIN)
 			{
