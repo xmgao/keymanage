@@ -900,19 +900,18 @@ int compare(const void *a, const void *b) {
 
     // return numA - numB;
 }
-
 void readFilesInFolder(const char *folderPath,FILE* fp) {
     DIR *dir;
     struct dirent *entry;
 
     dir = opendir(folderPath);
     if (dir == NULL) {
-        printf("无法打开文件夹！\n");
+        printf("\n");
         return;
     }
-    // 保存文件名的数组
-    const int maxFiles = 1000; // 最大文件数
-    const int maxFileNameLength = 256; // 文件名的最大长度
+    //
+    const int maxFiles = 1000; // 
+    const int maxFileNameLength = 256; // 
     char **fileNames = (char **)malloc(maxFiles * sizeof(char *));
     int numFiles = 0;
 
@@ -925,7 +924,7 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
         if (entry->d_type == DT_DIR) {
             readFilesInFolder(filePath,fp);
         } else {
-            // 将文件名添加到数组中
+            // 
 			fileNames[numFiles] = (char *)malloc(sizeof(char)*maxFileNameLength);
             strcpy(fileNames[numFiles],entry->d_name);
             numFiles++;
@@ -933,7 +932,7 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
     }
     closedir(dir);
 
-		//numFiles==1;等待然后跳转
+		//numFiles==1;
 	if(numFiles<=1) 
 	{	
 		sleep(2);
@@ -942,13 +941,13 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
 		return ;
 	}
 
-    // 对文件名进行排序
+    // 
     qsort(fileNames, numFiles, sizeof(const char *), compare);
 
-    // 打印排序后的文件名
+    // 
     for (int i = 0; i < numFiles-1; i++) {
         printf("filename:%s\n", fileNames[i]);
-        char kfilePath[256]; // 文件路径
+        char kfilePath[256]; // 
         sprintf(kfilePath, "%s/%s", folderPath,fileNames[i]);
          FILE *file = fopen(kfilePath, "r");
             if (file) {
@@ -958,7 +957,7 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
         			fwrite(buffer, 1, bytesRead, fp);
     			}
                 fclose(file);
-				//删除密钥文件
+				//
 				remove(kfilePath);
 
             }
@@ -967,6 +966,7 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
 
     free(fileNames);
 }
+
 
 
 //密钥写入
