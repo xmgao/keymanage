@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2023-12-20 18:05:21
+ * @LastEditTime: 2023-12-21 19:26:08
  * @FilePath: \c\keymanage\km.c
  * @Description:
  *
@@ -158,18 +158,18 @@ typedef struct SpiParams
 	int eM;													   // 加密密钥阈值，解密密钥阈值存在队列里
 	Keyblock *ekeybuff, *dkeybuff, *olddkeybuff;
 	int ekey_rw, dkey_lw, dkey_rw; // 加密右窗口，解密左窗口，解密右窗口
-	pthread_rwlock_t lock;		   // 读写锁变量
+	pthread_rwlock_t rwlock;		   // 读写锁变量
 	pthread_mutex_t mutex;			//互斥锁变量
 }SpiParams;
 
 
 typedef struct HandleData {
     char method[32];
-    char arg1[32];
-    char arg2[32];
-    char arg3[32];
-    char arg4[32];
-    int fd;
+    char arg1[16];
+    char arg2[16];
+    char arg3[16];
+    char arg4[16];
+	int fd;
 }HandleData;
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
@@ -339,7 +339,7 @@ bool con_unixserv(int *fd)
  * @param {int} epfd epoll文件描述符
  * @return {*}
  */
-void do_tcpcrecon(int fd, int epfd)
+void handler_conreq_tcp(int fd, int epfd)
 {
 	struct sockaddr_in cli_addr;
 	char cli_ip[16];
@@ -370,7 +370,7 @@ void do_tcpcrecon(int fd, int epfd)
  * @param {int} epfd epoll文件描述符
  * @return {*}
  */
-void do_unixcrecon(int fd, int epfd)
+void handler_conreq_unix(int fd, int epfd)
 {
 	struct sockaddr_un cli_addr;
 	int client_addr_size, ret;
@@ -419,7 +419,7 @@ void discon(int fd, int epfd)
  * @param {int} epfd
  * @return {*}
  */
-void do_recdata_unix(int fd, int epfd)
+void handler_recdata_unix(int fd, int epfd)
 {
 	char buffer[BUFFER_SIZE];
 	ssize_t bytesRead = read(fd, buffer, BUFFER_SIZE);
@@ -485,9 +485,10 @@ void do_recdata_unix(int fd, int epfd)
 			discon(fd, epfd);
 		}
 	}
+	return NULL;
 }
 
-void do_recdata_external(int fd, int epfd)
+void handler_recdata_tcp(int fd, int epfd)
 {
 
 	char buffer[BUFFER_SIZE];
@@ -513,27 +514,26 @@ void do_recdata_external(int fd, int epfd)
 		// 对应于encflagsync arg1==spi arg2=encrypt_flag
 		// 对应于derive_sync  arg1==spi arg2==key_d
 		// 对应于eM_sync  arg1==spi arg2==tem_eM
-		uint8_t method[32] = {}, arg1[64] = {}, arg2[64] = {}, arg3[64] = {}, arg4[64] = {};
-		int key_type;
-		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", method, arg1, arg2, arg3, arg4);
-		if (strncasecmp(method, "keyindexsync", 12) == 0)
+		HandleData data1;
+		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", data1.method, data1.arg1, data1.arg2, data1.arg3, data1.arg4);
+		if (strncasecmp(data1.method, "keyindexsync", 12) == 0)
 		{
-			keysync_handle(arg1, arg2, fd);
+			keysync_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(method, "encflagsync", 11) == 0)
+		else if (strncasecmp(data1.method, "encflagsync", 11) == 0)
 		{
-			encflag_handle(arg1, arg2, fd);
+			encflag_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(method, "desync", 6) == 0)
+		else if (strncasecmp(data1.method, "desync", 6) == 0)
 		{
-			desync_handle(arg1, arg2, fd);
+			desync_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(method, "eMsync", 6) == 0)
+		else if (strncasecmp(data1.method, "eMsync", 6) == 0)
 		{
-			eMsync_handle(arg1, arg2, fd);
+			eMsync_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
 		else
@@ -817,10 +817,10 @@ void readsharedkey(char *const buf, int len)
 		perror("open keyfile error!\n");
 		exit(1);
 	}
-	fseek(fp, SAkeyindex, SEEK_SET);
-	int bytes_read = fread(pb, sizeof(char), len, fp);
 	while (1)
 	{
+		fseek(fp, SAkeyindex, SEEK_SET); //将文件指针偏移到指定位置
+		int bytes_read = fread(pb, sizeof(char), len, fp);
 		// 在 buffer 中有 bytes_read 个字节的数据，其中可能包含空字符
 		if (bytes_read == len)
 		{
@@ -833,7 +833,6 @@ void readsharedkey(char *const buf, int len)
 			sleep(1);
 			pthread_rwlock_rdlock(&keywr); // 上读锁
 			printf("key require try again!\n");
-			fseek(fp, SAkeyindex, SEEK_SET); // 将文件指针偏移到指定位置
 		}
 	}
 	SAkeyindex += len;
@@ -850,7 +849,7 @@ void readsharedkey(char *const buf, int len)
 void readSAkey(SpiParams *local_spi, char *const buf, int len)
 {
 	char *pb = buf;
-	// pthread_rwlock_rdlock(&keywr); // 上读锁
+	pthread_rwlock_rdlock(&(local_spi->keywr)); // 上读锁
 	FILE *fp = fopen(local_spi->keyfile, "r");
 	if (fp == NULL)
 	{
@@ -860,7 +859,7 @@ void readSAkey(SpiParams *local_spi, char *const buf, int len)
 	int keyindex = local_spi->keyindex;
 	while (1)
 	{
-		fseek(fp, keyindex, SEEK_SET);
+		fseek(fp, keyindex, SEEK_SET); // 将文件指针偏移到指定位置
 		int bytes_read = fread(pb, sizeof(char), len, fp);
 		if (bytes_read == len)
 		{
@@ -870,15 +869,16 @@ void readSAkey(SpiParams *local_spi, char *const buf, int len)
 		else
 		{
 			printf("key supply empty!\n");
+			pthread_rwlock_unlock(&local_spi->keywr); // 解锁
 			sleep(1);
+			pthread_rwlock_rdlock(&local_spi->keywr); // 上读锁
 			printf("key require try again!\n");
-			fseek(fp, keyindex, SEEK_SET); // 将文件指针偏移到指定位置
 		}
 	}
 	keyindex += len;
 	local_spi->keyindex = keyindex;
 	fclose(fp);
-	// pthread_rwlock_unlock(&keywr); // 解锁
+	pthread_rwlock_unlock(&local_spi->keywr); // 解锁
 }
 
 /**
@@ -919,7 +919,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	int len = atoi(keylen);
 	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
 	// 加锁
-    pthread_mutex_lock(&mutex);
+    pthread_mutex_lock(&local_spi->mutex);
 	if (seq == 1)
 	{
 		if (!encflag_sync(local_spi))
@@ -951,7 +951,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			local_spi->ekey_rw += local_spi->cur_ekeyd;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&mutex);
+    	pthread_mutex_unlock(&local_spi->mutex);
 		memcpy(buf, local_spi->raw_ekey, len);
 
 	}
@@ -969,7 +969,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			goto loop1;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&mutex);
+    	pthread_mutex_unlock(&local_spi->mutex);
 		if (seq >= local_spi->dkey_lw)
 		{
 			memcpy(buf, local_spi->raw_dkey, len); // 正常数据包
@@ -983,7 +983,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 }
 
 
-// 处理 getsk 请求的线程
+// 处理 getsk 请求的工作线程
 void *getsk_handle_thread(void *args) {
     HandleData *handleData = (HandleData *)args;
     // 在这里执行 getsk_handle 的操作
@@ -1013,7 +1013,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 	SpiParams *local_spi = dynamicSPI[i];
 	int seq = atoi(syn);
 	// 加锁
-    pthread_mutex_lock(&mutex);
+    pthread_mutex_lock(&local_spi->mutex);
 	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
 	if (seq == 1)
 	{
@@ -1050,7 +1050,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			local_spi->ekey_rw = ekey_rw + WINSIZE;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&mutex);
+    	pthread_mutex_unlock(&local_spi->mutex);
 		memcpy(buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].key, local_spi->ekeybuff[(seq - 1) % WINSIZE].size);
 	}
 	else
@@ -1074,7 +1074,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			goto loop2;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&mutex);
+    	pthread_mutex_unlock(&local_spi->mutex);
 		if (seq >= local_spi->dkey_lw)
 		{
 			memcpy(buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].key, local_spi->dkeybuff[(seq - 1) % WINSIZE].size); //正常数据包
@@ -1106,7 +1106,7 @@ void *getotpk_handle_thread(void *args) {
  * @return {*}
  */
 void spiregister_handle(const char *spi, const char *inbound, int fd)
-{
+{	
 	// 假设通过某种方式检测到新的SPI
 	int newSPI = atoi(spi);
 	int inbound = atoi(inbound);
@@ -1117,7 +1117,7 @@ void spiregister_handle(const char *spi, const char *inbound, int fd)
 	sprintf(hexStr, "%x", spi);					   // 将数字转换为十六进制字符串
 	strcpy(dynamicSPI[spiCount]->keyfile, hexStr); // 用SPI初始化密钥池
 	// TODO:为每个spi密钥池填充密钥
-	pthread_rwlock_init(&(dynamicSPI[spiCount]->lock), NULL); // 初始化读写锁
+	pthread_rwlock_init(&(dynamicSPI[spiCount]->rwlock), NULL); // 初始化读写锁
 	dynamicSPI[spiCount]->mutex=PTHREAD_MUTEX_INITIALIZER; // 初始化互斥锁
 	if (dynamicSPI[spiCount] != NULL)
 	{
@@ -1243,7 +1243,7 @@ void eMsync_handle(const char *spi, const char *tmp_eM, int fd)
 }
 
 // 子线程的代码,监听本地socket端口
-void *Listeninglocalsocket(void *arg)
+void *reactor_local_socket(void *arg)
 {
 	// 子线程的代码
 	printf("This is the child thread.\n");
@@ -1275,11 +1275,11 @@ void *Listeninglocalsocket(void *arg)
 				if (fd == local_lfd)
 				{
 					printf("local_connection success!\n");
-					do_unixcrecon(local_lfd, epfd); // 处理本地连接请求
+					handler_conreq_unix(local_lfd, epfd); // 处理本地连接请求
 				}
 				else
 				{
-					do_recdata_unix(fd, epfd); // 密钥请求及注册事件
+					handler_recdata_unix(fd, epfd); // 密钥请求及注册事件
 				}
 			}
 		}
@@ -1294,11 +1294,11 @@ void *Listeninglocalsocket(void *arg)
  * @param {int} external_port 外部监听端口
  * @return {*}
  */
-void epoll_run(int external_port)
+void epoll_reactor_run(int external_port)
 {
 	pthread_t tid;
 	// 创建子线程
-	int ret = pthread_create(&tid, NULL, Listeninglocalsocket, NULL);
+	int ret = pthread_create(&tid, NULL, reactor_local_socket, NULL);
 	if (ret != 0)
 	{
 		fprintf(stderr, "Failed to create thread.\n");
@@ -1332,11 +1332,11 @@ void epoll_run(int external_port)
 			{
 				if (fd == external_lfd)
 				{
-					do_tcpcrecon(external_lfd, epfd1); // 处理外部TCP连接请求
+					handler_conreq_tcp(external_lfd, epfd1); // 处理外部TCP连接请求
 				}
 				else
 				{
-					do_recdata_external(fd, epfd1); // 密钥参数同步事件
+					handler_recdata_tcp(fd, epfd1); // 密钥参数同步事件
 				}
 			}
 		}
@@ -1371,7 +1371,7 @@ int main(int argc, char *argv[])
 	}
 	pthread_create(&writethread, NULL, thread_writesharedkey, NULL); // 密钥写入线程启动
 	pthread_detach(writethread);										// 线程分离
-	epoll_run(SERV_PORT);										// 启动监听服务器，开始监听密钥请求
+	epoll_reactor_run(SERV_PORT);										// 启动监听服务器，开始监听密钥请求
 	pthread_rwlock_destroy(&keywr);								// 销毁读写锁
 	for (int i = 0; i < spiCount; ++i)
 	{ // 释放内存
