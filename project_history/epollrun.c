@@ -909,8 +909,8 @@ void readFilesInFolder(const char *folderPath,FILE* fp) {
         printf("\n");
         return;
     }
-    //
-    const int maxFiles = 1000; // 
+    //一次最多读100个密钥文件，大小1M
+    const int maxFiles = 100; // 
     const int maxFileNameLength = 256; // 
     char **fileNames = (char **)malloc(maxFiles * sizeof(char *));
     int numFiles = 0;
