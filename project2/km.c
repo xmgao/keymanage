@@ -2,7 +2,17 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2023-12-22 19:38:20
+ * @LastEditTime: 2023-12-24 18:33:52
+ * @FilePath: \c\keymanage\project2\km.c
+ * @Description:
+ *
+ * Copyright (c) 2023 by ${git_name_email}, All Rights Reserved.
+ */
+/*
+ * @Author: xmgao dearlanxing@mail.ustc.edu.cn
+ * @Date: 2023-03-30 15:42:44
+ * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
+ * @LastEditTime: 2023-12-24 14:58:12
  * @FilePath: \c\keymanage\project2\km.c
  * @Description:
  *
@@ -11,30 +21,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <sys/epoll.h>
-#include <sys/types.h>
+#include "km.h"
 
-#include <fcntl.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
-#include <sys/time.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <ctype.h>
-#include <stdbool.h>
-#include <netinet/in.h>
-#include <sys/un.h>
-#include <error.h>
-#include <dirent.h>
-#include <math.h>
-#include <pthread.h>
-
-//  编译: gcc epollrun.c -o km -g -pthread
-// 运行 ./km remoteip
+//  编译: gcc km.c -o km -g -pthread
+// 运行 sudo ./km remoteip 2> errlog
 
 #define MAX_EVENTS 64	// 最大监听数量
 #define BUFFER_SIZE 128 // 普通数据包缓冲区最大长度
@@ -52,125 +42,10 @@
 #define up_index 2					  // 派生增长因子
 #define down_index 500				  // 派生减少因子
 #define LT 0.2						  // 下界
-#define LT 0.7						  // 上界
+#define HT 0.7						  // 上界
 #define WINSIZE 4096				  // 密钥窗口大小
 #define MAX_DYNAMIC_SPI_COUNT 100	  // 最多同时存在SPI个数
 #define INIT_KEYM 16				  // 初始密钥块阈值16字节
-#define OTPTH 128					  // OTP原始密钥上界128字节
-// 解密派生参数队列长度
-#define MAX_QUEUE_SIZE 100
-
-
-typedef struct
-{
-	int data[MAX_QUEUE_SIZE];
-	int front;
-	int rear;
-} Queue;
-
-// 初始化队列
-void initializeQueue(Queue *queue)
-{
-	queue->front = -1;
-	queue->rear = -1;
-}
-
-// 检查队列是否为空
-int isEmpty(Queue *queue)
-{
-	return (queue->front == -1 && queue->rear == -1);
-}
-
-// 检查队列是否已满
-int isFull(Queue *queue)
-{
-	return ((queue->rear + 1) % MAX_QUEUE_SIZE == queue->front);
-}
-
-// 入队
-/**
- * @description:
- * @param {Queue} *queue
- * @param {int} value
- * @return {*}
- */
-void enqueue(Queue *queue, int value)
-{
-	if (isFull(queue))
-	{
-		printf("Queue is full. Cannot enqueue.\n");
-		return;
-	}
-	else if (isEmpty(queue))
-	{
-		queue->front = 0;
-		queue->rear = 0;
-	}
-	else
-	{
-		queue->rear = (queue->rear + 1) % MAX_QUEUE_SIZE;
-	}
-	queue->data[queue->rear] = value;
-}
-
-// 出队
-int dequeue(Queue *queue)
-{
-	int value;
-	if (isEmpty(queue))
-	{
-		printf("Queue is empty. Cannot dequeue.\n");
-		return -1; // 代表出队失败
-	}
-	else if (queue->front == queue->rear)
-	{
-		value = queue->data[queue->front];
-		queue->front = -1;
-		queue->rear = -1;
-	}
-	else
-	{
-		value = queue->data[queue->front];
-		queue->front = (queue->front + 1) % MAX_QUEUE_SIZE;
-	}
-	return value;
-}
-
-// 用于OTP的密钥块结构体
-typedef struct
-{
-	char key[OTPTH + 1];
-	int size;
-} Keyblock;
-
-// 结构体定义，存储与每个SPI相关的参数
-typedef struct SpiParams
-{
-	int spi;												   // SPI值，用数字表示
-	bool in_bound;											   // true如果是入站SPI
-	char keyfile[100];										   // spi对应的密钥池文件名
-	bool key_sync_flag;										   // 密钥索引同步标志
-	int delkeyindex, keyindex;								   // 密钥索引，用于删除过期密钥，标识当前的密钥
-	int encrypt_flag;										   // 加密密钥以及解密密钥的对应关系，0标识加密，1标识解密
-	int cur_ekeyd;		   						   // 记录当前的加密密钥派生参数
-	char raw_ekey[64 + 1], raw_dkey[64 + 1], old_dkey[64 + 1]; // 记录原始量子密钥
-	Queue myQueue;											   // 解密参数队列，otp和sk复用
-	int eM;													   // 加密密钥阈值，解密密钥阈值存在队列里
-	Keyblock *ekeybuff, *dkeybuff, *olddkeybuff;
-	int ekey_rw, dkey_lw, dkey_rw; // 加密右窗口，解密左窗口，解密右窗口
-	pthread_rwlock_t rwlock;		   // 读写锁变量
-	pthread_mutex_t mutex;			//互斥锁变量
-}SpiParams;
-
-
-typedef struct HandleData {
-    char method[32];
-    char arg1[16];
-    char arg2[16];
-    char arg3[16];
-    char arg4[16];
-	int fd;
-}HandleData;
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
 int SAkeyindex;			// 用于标识本地SA密钥池索引。
@@ -203,6 +78,8 @@ int init_listen_local(int epfd)
 	serv_addr.sun_family = AF_UNIX;
 	strncpy(serv_addr.sun_path, socket_path, sizeof(serv_addr.sun_path) - 1);
 
+	// 在bind之前，你可以选择性地删除已存在的套接字文件
+	unlink(socket_path); // 删除已存在的文件
 	// 绑定 UNIX 域套接字
 	ret = bind(unix_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
 	if (ret < 0)
@@ -373,10 +250,19 @@ void handler_conreq_tcp(int fd, int epfd)
 void handler_conreq_unix(int fd, int epfd)
 {
 	struct sockaddr_un cli_addr;
-	int client_addr_size, ret;
+	int ret;
 	struct epoll_event tep;
+	socklen_t client_addr_size = sizeof(struct sockaddr_un);
 	int ar = accept(fd, (struct sockaddr *)&cli_addr, &client_addr_size);
-	printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
+	if (ar == -1)
+	{
+		perror("accept unix error");
+		// 处理错误
+	}
+	else
+	{
+		printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
+	}
 
 	// 设置 ar socket 非阻塞
 	int flag = fcntl(ar, F_GETFL);
@@ -437,9 +323,13 @@ void handler_recdata_unix(int fd, int epfd)
 	{
 		// 在这里处理从 UNIX 域套接字中读取的数据
 		// 可以根据需求对读取到的数据进行处理
+		// 读取数据后，检查并去除换行符
+		if (buffer[bytesRead - 1] == '\n') {
+			buffer[bytesRead - 1] = '\0'; // 将换行符替换为字符串结束符
+		}
 		printf("Received data from socket: %s\n", buffer);
 		// 对应于getk  arg1=keylen(字节)
-		// 对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype
+		// 对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype(0解密；1解密)
 		// 对应于getotpk arg1==spi, arg2=syn,arg3=keytype
 		// 对应于spiregister arg1==spi, arg2=inbound
 		HandleData data1;
@@ -457,27 +347,29 @@ void handler_recdata_unix(int fd, int epfd)
 		else if (strncasecmp(data1.method, "getotpk", 7) == 0)
 		{
 			// 创建一个处理 getotpk 的子线程任务
-			HandleData *args = (HandleData *)malloc(sizeof(HandleData));;
-			args->arg1 =data1.arg1 /* 设置 arg1 */;
-			args->arg2 =data1.arg2 /* 设置 arg2 */;
-			args->arg3 =data1.arg3 /* 设置 arg3 */;
-			args->fd =fd /* 设置 fd */;
+			HandleData *args = (HandleData *)malloc(sizeof(HandleData));
+			;
+			strcpy(args->arg1, data1.arg1);
+			strcpy(args->arg2, data1.arg2);
+			strcpy(args->arg3, data1.arg3);
+			args->fd = fd /* 设置 fd */;
 			pthread_t tid;
-            pthread_create(&tid, NULL, getotpk_handle_thread, args); // 创建新线程
-			pthread_detach(tid); // 分离线程
+			pthread_create(&tid, NULL, getotpk_handle_thread, args); // 创建新线程
+			pthread_detach(tid);									 // 分离线程
 		}
 		else if (strncasecmp(data1.method, "getsk", 5) == 0)
 		{
 			// 创建一个处理 getsk 的子线程任务
-			HandleData *args = (HandleData *)malloc(sizeof(HandleData));;
-			args->arg1 =data1.arg1 /* 设置 arg1 */;
-			args->arg2 =data1.arg2 /* 设置 arg2 */;
-			args->arg3 =data1.arg3 /* 设置 arg3 */;
-			args->arg4 =data1.arg4 /* 设置 arg4 */;
-			args->fd =fd /* 设置 fd */;
+			HandleData *args = (HandleData *)malloc(sizeof(HandleData));
+			;
+			strcpy(args->arg1, data1.arg1);
+			strcpy(args->arg2, data1.arg2);
+			strcpy(args->arg3, data1.arg3);
+			strcpy(args->arg4, data1.arg4);
+			args->fd = fd /* 设置 fd */;
 			pthread_t tid;
-            pthread_create(&tid, NULL, getsk_handle_thread, args); // 创建新线程
-			pthread_detach(tid); // 分离线程
+			pthread_create(&tid, NULL, getsk_handle_thread, args); // 创建新线程
+			pthread_detach(tid);								   // 分离线程
 		}
 		else
 		{
@@ -485,7 +377,7 @@ void handler_recdata_unix(int fd, int epfd)
 			discon(fd, epfd);
 		}
 	}
-	return NULL;
+	return;
 }
 
 void handler_recdata_tcp(int fd, int epfd)
@@ -595,7 +487,7 @@ bool key_index_sync(SpiParams *local_spi)
 	}
 	ret = read(fd, rbuf, sizeof(rbuf));
 	int global_keyindex;
-	sscanf(rbuf, "%[^ ] %d", method, &global_keyindex, ); // 修改
+	sscanf(rbuf, "%[^ ] %d", method, &global_keyindex); // 修改
 	close(fd);
 	local_spi->keyindex = max(local_keyindex + local_delkeyindex, global_keyindex) - local_delkeyindex;
 	local_spi->key_sync_flag = true;
@@ -625,7 +517,7 @@ bool derive_sync(SpiParams *local_spi)
 	{
 		tmp_keyd = (next_ekeyd * up_index) < 10000 ? next_ekeyd * up_index : 10000; // 乘性增加，增大每个密钥保护数据包范围
 	}
-	else if (poolsize > LT * MAX_KEYFILE_SIZE)
+	else if (poolsize > HT * MAX_KEYFILE_SIZE)
 	{
 		tmp_keyd = (next_ekeyd - down_index) > 100 ? next_ekeyd - down_index : 100; // 线性减小，减少每个密钥保护数据包范围
 	}
@@ -648,7 +540,7 @@ bool derive_sync(SpiParams *local_spi)
 	close(fd);
 	if (tmp_keyd == r_keyd)
 	{
-			local_spi->cur_ekeyd = tmp_keyd;
+		local_spi->cur_ekeyd = tmp_keyd;
 		return true;
 	}
 	return false;
@@ -762,100 +654,111 @@ void renewkey(SpiParams *local_spi)
 	}
 }
 
-
-
 // 比较函数用于排序
-int compare(const void *a, const void *b) {
-    const char *strA = *(const char **)a;
-    const char *strB = *(const char **)b;
-	 return strcmp(strA,strB);
-    // 将文件名转换为数字并进行比较
-    // int numA = atoi(strA);
-    // int numB = atoi(strB);
+int compare(const void *a, const void *b)
+{
+	const char *strA = *(const char **)a;
+	const char *strB = *(const char **)b;
+	return strcmp(strA, strB);
+	// 将文件名转换为数字并进行比较
+	// int numA = atoi(strA);
+	// int numB = atoi(strB);
 
-    // return numA - numB;
+	// return numA - numB;
 }
-void readFilesInFolder(const char *folderPath,FILE* fp) {
-    DIR *dir;
-    struct dirent *entry;
+void readFilesInFolder(const char *folderPath, FILE *fp)
+{
+	DIR *dir;
+	struct dirent *entry;
 
-    dir = opendir(folderPath);
-    if (dir == NULL) {
-        printf("\n");
-        return;
-    }
-    //最多100个密钥文件，100k
-    const int maxFiles = 100; // 
-    const int maxFileNameLength = 256; // 最大文件名长度
-    char **fileNames = (char **)malloc(maxFiles * sizeof(char *));
-    int numFiles = 0;
+	dir = opendir(folderPath);
+	if (dir == NULL)
+	{
+		printf("\n");
+		return;
+	}
+	// 最多100个密钥文件，100k
+	const int maxFiles = 100;		   //
+	const int maxFileNameLength = 256; // 最大文件名长度
+	char **fileNames = (char **)malloc(maxFiles * sizeof(char *));
+	int numFiles = 0;
 
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-            continue;
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+			continue;
 
-        char filePath[maxFileNameLength];
-        sprintf(filePath, "%s/%s", folderPath, entry->d_name);
-        if (entry->d_type == DT_DIR) {
-            readFilesInFolder(filePath,fp);
-        } else {
-            // 
-			fileNames[numFiles] = (char *)malloc(sizeof(char)*maxFileNameLength);
-            strcpy(fileNames[numFiles],entry->d_name);
-            numFiles++;
-        }
-    }
-    closedir(dir);
+		char filePath[maxFileNameLength];
+		sprintf(filePath, "%s/%s", folderPath, entry->d_name);
+		if (entry->d_type == DT_DIR)
+		{
+			readFilesInFolder(filePath, fp);
+		}
+		else
+		{
+			//
+			fileNames[numFiles] = (char *)malloc(sizeof(char) * maxFileNameLength);
+			strcpy(fileNames[numFiles], entry->d_name);
+			numFiles++;
+		}
+	}
+	closedir(dir);
 
-		//numFiles==1;保护最后一个密钥文件，有可能正在写入
-	if(numFiles<=1) 
-	{	
+	// numFiles==1;保护最后一个密钥文件，有可能正在写入
+	if (numFiles <= 1)
+	{
 		sleep(2);
 		free(fileNames[0]);
 		free(fileNames);
-		return ;
+		return;
 	}
 
-    // 将密钥文件按照文件名(产生的时间顺序)排序
-    qsort(fileNames, numFiles, sizeof(const char *), compare);
+	// 将密钥文件按照文件名(产生的时间顺序)排序
+	qsort(fileNames, numFiles, sizeof(const char *), compare);
 
-    //写入密钥到文件fp内
-    for (int i = 0; i < numFiles-1; i++) {
-        printf("filename:%s\n", fileNames[i]);
-        char kfilePath[256]; // 
-        sprintf(kfilePath, "%s/%s", folderPath,fileNames[i]);
-         FILE *file = fopen(kfilePath, "ab");
-            if (file) {
-				 char buffer[1024];
-    			size_t bytesRead;
-    			while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        			fwrite(buffer, 1, bytesRead, fp);
-    			}
-                fclose(file);
-				//读取后删除密钥
-				//remove(kfilePath);
-            }
-        free(fileNames[i]);
-    }
+	// 写入密钥到文件fp内
+	for (int i = 0; i < numFiles - 1; i++)
+	{
+		// printf("filename:%s\n", fileNames[i]);
+		char kfilePath[256]; //
+		sprintf(kfilePath, "%s/%s", folderPath, fileNames[i]);
+		FILE *file = fopen(kfilePath, "rb");
+		if (file)
+		{
+			char buffer[1024];
+			size_t bytesRead;
+			while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0)
+			{
+				fwrite(buffer, 1, bytesRead, fp);
+			}
+			fclose(file);
+			// 读取后删除密钥
+			// remove(kfilePath);
+		}
+		free(fileNames[i]);
+	}
 
-    free(fileNames);
+	free(fileNames);
 }
 
-
-
-//为每个spi的密钥池写入密钥
-void keyfile_write() {
-	//首先定义文件指针：fp
+// 为每个spi的密钥池写入密钥
+void *thread_writeSAkey(void *args)
+{
 
 	printf("spikey supply starting...\n");
-	//模拟不断写入密钥到密钥池文件
-	for(int i=0;i<spiCount;i++){
-	FILE* fp = fopen(dynamicSPI[spiCount]->keyfile, "ab");
-	const char *folderPath = "my_folder"; // 文件夹路径
-	pthread_rwlock_wrlock(&dynamicSPI[spiCount]->rwlock); // 上写锁
-    readFilesInFolder(folderPath,fp);
-	pthread_rwlock_unlock(&dynamicSPI[spiCount]->rwlock); // 解锁
-	fclose(fp);
+	// 模拟不断写入密钥到密钥池文件
+	while (1)
+	{
+		sleep(2); // 等待2s
+		for (int i = 0; i < spiCount; i++)
+		{
+			FILE *fp = fopen(dynamicSPI[i]->keyfile, "ab");
+			const char *folderPath = "my_folder";		   // 文件夹路径
+			pthread_rwlock_wrlock(&dynamicSPI[i]->rwlock); // 上写锁
+			readFilesInFolder(folderPath, fp);
+			pthread_rwlock_unlock(&dynamicSPI[i]->rwlock); // 解锁
+			fclose(fp);
+		}
 	}
 }
 
@@ -873,9 +776,8 @@ void *thread_writesharedkey(void *args)
 	// 模拟不断写入密钥到密钥池文件
 	srand(666);
 	while (1)
-	{	//先为spi密钥池填充密钥
-		keyfile_write();
-		//再填充sharedkey密钥,写入DH密钥和预共享密钥，为他们单独提供一个密钥池
+	{
+		// 再填充sharedkey密钥,写入DH密钥和预共享密钥，为他们单独提供一个密钥池
 		unsigned char *buf = (unsigned char *)malloc(KEY_CREATE_RATE * sizeof(unsigned char));
 		int i = 0;
 		for (; i < KEY_CREATE_RATE; i++)
@@ -887,7 +789,7 @@ void *thread_writesharedkey(void *args)
 		fseek(fp, 0, SEEK_END);	  // 定位到文件末
 		int nFileLen = ftell(fp); // 文件长度
 		fseek(fp, 0, SEEK_SET);	  // 恢复到文件头
-		printf("keypoolsize:%d Byetes\n", nFileLen);
+		// printf("keypoolsize:%d Byetes\n", nFileLen);
 		if (nFileLen < MAX_KEYFILE_SIZE)
 		{
 			fwrite(buf, sizeof(unsigned char), KEY_CREATE_RATE, fp);
@@ -918,7 +820,7 @@ void readsharedkey(char *const buf, int len)
 	}
 	while (1)
 	{
-		fseek(fp, SAkeyindex, SEEK_SET); //将文件指针偏移到指定位置
+		fseek(fp, SAkeyindex, SEEK_SET); // 将文件指针偏移到指定位置
 		int bytes_read = fread(pb, sizeof(char), len, fp);
 		// 在 buffer 中有 bytes_read 个字节的数据，其中可能包含空字符
 		if (bytes_read == len)
@@ -948,7 +850,7 @@ void readsharedkey(char *const buf, int len)
 void readSAkey(SpiParams *local_spi, char *const buf, int len)
 {
 	char *pb = buf;
-	pthread_rwlock_rdlock(&(local_spi->keywr)); // 上读锁
+	pthread_rwlock_rdlock(&(local_spi->rwlock)); // 上读锁
 	FILE *fp = fopen(local_spi->keyfile, "rb");
 	if (fp == NULL)
 	{
@@ -968,16 +870,16 @@ void readSAkey(SpiParams *local_spi, char *const buf, int len)
 		else
 		{
 			printf("key supply empty!\n");
-			pthread_rwlock_unlock(&local_spi->keywr); // 解锁
+			pthread_rwlock_unlock(&local_spi->rwlock); // 解锁
 			sleep(1);
-			pthread_rwlock_rdlock(&local_spi->keywr); // 上读锁
+			pthread_rwlock_rdlock(&local_spi->rwlock); // 上读锁
 			printf("key require try again!\n");
 		}
 	}
 	keyindex += len;
 	local_spi->keyindex = keyindex;
 	fclose(fp);
-	pthread_rwlock_unlock(&local_spi->keywr); // 解锁
+	pthread_rwlock_unlock(&local_spi->rwlock); // 解锁
 }
 
 /**
@@ -995,8 +897,6 @@ void getsharedkey_handle(const char *keylen, int fd)
 	send(fd, buf, len, 0);
 }
 
-
-
 /**
  * @description: 会话密钥请求处理 密钥窗口还是放在kms里
  * @param {char} *spi 传入的SPI数字，字符串的形式
@@ -1009,7 +909,8 @@ void getsharedkey_handle(const char *keylen, int fd)
 void getsk_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
-	while (dynamicSPI[i]->spi != atoi(spi))
+	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi);
+	while (dynamicSPI[i]->spi != hostspi)
 	{
 		i++;
 	}
@@ -1018,12 +919,11 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	int len = atoi(keylen);
 	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
 	// 加锁
-    pthread_mutex_lock(&local_spi->mutex);
+	pthread_mutex_lock(&local_spi->mutex);
 	if (seq == 1)
 	{
 		if (!encflag_sync(local_spi))
 			perror("encflag_sync error!\n");
-		return;
 	}
 	// 判断密钥索引是否同步，否则进行密钥索引同步
 	if (!local_spi->key_sync_flag)
@@ -1037,7 +937,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	}
 	char buf[BUFFER_SIZE];
 	if (*key_type == '0')
-	{	
+	{
 		if (seq > local_spi->ekey_rw)
 		{									   // 如果还没有初始的密钥或者超出密钥服务范围需要进行派生参数同步
 			bool ret = derive_sync(local_spi); // 派生参数同步
@@ -1050,9 +950,8 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			local_spi->ekey_rw += local_spi->cur_ekeyd;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&local_spi->mutex);
+		pthread_mutex_unlock(&local_spi->mutex);
 		memcpy(buf, local_spi->raw_ekey, len);
-
 	}
 	else // 解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
 	{
@@ -1068,31 +967,30 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			goto loop1;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&local_spi->mutex);
+		pthread_mutex_unlock(&local_spi->mutex);
 		if (seq >= local_spi->dkey_lw)
 		{
 			memcpy(buf, local_spi->raw_dkey, len); // 正常数据包
 		}
 		else
-		{	
-			memcpy(buf, local_spi->old_dkey, len);// 乱序数据包
+		{
+			memcpy(buf, local_spi->old_dkey, len); // 乱序数据包
 		}
 	}
 	send(fd, buf, len, 0);
 }
 
-
 // 处理 getsk 请求的工作线程
-void *getsk_handle_thread(void *args) {
-    HandleData *handleData = (HandleData *)args;
-    // 在这里执行 getsk_handle 的操作
-    // 使用 handleData 中的参数进行处理
-	getsk_handle(handleData->arg1,handleData->arg2,handleData->arg3,handleData->arg4,handleData->fd);
-    // 释放传入的数据结构内存
-    free(handleData);
-    return NULL;
+void *getsk_handle_thread(void *args)
+{
+	HandleData *handleData = (HandleData *)args;
+	// 在这里执行 getsk_handle 的操作
+	// 使用 handleData 中的参数进行处理
+	getsk_handle(handleData->arg1, handleData->arg2, handleData->arg3, handleData->arg4, handleData->fd);
+	// 释放传入的数据结构内存
+	free(handleData);
+	return NULL;
 }
-
 
 /**
  * @description: otp密钥请求处理
@@ -1105,14 +1003,15 @@ void *getsk_handle_thread(void *args) {
 void getotpk_handle(const char *spi, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
-	while (dynamicSPI[i]->spi != atoi(spi))
+	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi);
+	while (dynamicSPI[i]->spi != hostspi)
 	{
 		i++;
 	}
 	SpiParams *local_spi = dynamicSPI[i];
 	int seq = atoi(syn);
 	// 加锁
-    pthread_mutex_lock(&local_spi->mutex);
+	pthread_mutex_lock(&local_spi->mutex);
 	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
 	if (seq == 1)
 	{
@@ -1137,7 +1036,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 		if (seq > ekey_rw)
 		{ // 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
 			if (local_spi->ekeybuff != NULL)
-				free(ekeybuff);
+				free(local_spi->ekeybuff);
 			local_spi->ekeybuff = (Keyblock *)malloc(WINSIZE * sizeof(Keyblock));
 			bool ret = eM_sync(local_spi); // 密钥块阈值M同步
 			for (int i = 0; i < WINSIZE; i++)
@@ -1149,7 +1048,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			local_spi->ekey_rw = ekey_rw + WINSIZE;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&local_spi->mutex);
+		pthread_mutex_unlock(&local_spi->mutex);
 		memcpy(buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].key, local_spi->ekeybuff[(seq - 1) % WINSIZE].size);
 	}
 	else
@@ -1173,28 +1072,28 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			goto loop2;
 		}
 		// 解锁
-    	pthread_mutex_unlock(&local_spi->mutex);
+		pthread_mutex_unlock(&local_spi->mutex);
 		if (seq >= local_spi->dkey_lw)
 		{
-			memcpy(buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].key, local_spi->dkeybuff[(seq - 1) % WINSIZE].size); //正常数据包
+			memcpy(buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].key, local_spi->dkeybuff[(seq - 1) % WINSIZE].size); // 正常数据包
 		}
 		else
 		{
-			memcpy(buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].key, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size); //乱序数据包
+			memcpy(buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].key, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size); // 乱序数据包
 		}
 	}
 	send(fd, buf, buf_size, 0);
 }
 
-
 // 处理 getotp 请求的线程
-void *getotpk_handle_thread(void *args) {
-    HandleData *handleData = (HandleData *)args;
-    // 使用 handleData 中的参数进行处理
-	getotpk_handle(handleData->arg1,handleData->arg2,handleData->arg3,handleData->fd);
-    // 释放传入的数据结构内存
-    free(handleData);
-    return NULL;
+void *getotpk_handle_thread(void *args)
+{
+	HandleData *handleData = (HandleData *)args;
+	// 使用 handleData 中的参数进行处理
+	getotpk_handle(handleData->arg1, handleData->arg2, handleData->arg3, handleData->fd);
+	// 释放传入的数据结构内存
+	free(handleData);
+	return NULL;
 }
 
 /**
@@ -1205,18 +1104,18 @@ void *getotpk_handle_thread(void *args) {
  * @return {*}
  */
 void spiregister_handle(const char *spi, const char *inbound, int fd)
-{	
+{
 	// 假设通过某种方式检测到新的SPI
 	int newSPI = atoi(spi);
-	int inbound = atoi(inbound);
+	int newinbound = atoi(inbound);
 	// 动态分配内存，并存储新的SPI参数
 	dynamicSPI[spiCount] = (SpiParams *)malloc(sizeof(SpiParams));
 
-	char hexStr[20];							   // 足够大的字符数组来存储转换后的字符串
-	sprintf(hexStr, "%x", spi);					   // 将数字转换为十六进制字符串
-	strcpy(dynamicSPI[spiCount]->keyfile, hexStr); // 用SPI初始化密钥池名字
+	// char hexStr[32];							   // 足够大的字符数组来存储转换后的字符串
+	// sprintf(hexStr, "%x", newSPI);					   // 将数字转换为十六进制字符串
+	strcpy(dynamicSPI[spiCount]->keyfile, spi);					// 用SPI初始化密钥池名字
 	pthread_rwlock_init(&(dynamicSPI[spiCount]->rwlock), NULL); // 初始化读写锁
-	dynamicSPI[spiCount]->mutex=PTHREAD_MUTEX_INITIALIZER; // 初始化互斥锁
+	pthread_mutex_init(&(dynamicSPI[spiCount]->mutex), NULL);	// 初始化互斥锁
 	if (dynamicSPI[spiCount] != NULL)
 	{
 		dynamicSPI[spiCount]->spi = newSPI;
@@ -1227,10 +1126,10 @@ void spiregister_handle(const char *spi, const char *inbound, int fd)
 		dynamicSPI[spiCount]->dkeybuff = NULL;
 		dynamicSPI[spiCount]->olddkeybuff = NULL;
 		// 如果是入站SPI，需要初始化解密参数
-		if (inbound)
+		if (newinbound)
 		{
 			dynamicSPI[spiCount]->encrypt_flag = 1;
-			initializeQueue(&(dynamicSPI[spiCount]->myQueue));	//初始化解密密钥派生参数队列
+			initializeQueue(&(dynamicSPI[spiCount]->myQueue)); // 初始化解密密钥派生参数队列
 		}
 		else
 		{
@@ -1266,8 +1165,8 @@ void encflag_handle(const char *spi, const char *remote_flag, int fd)
 	}
 	SpiParams *local_spi = dynamicSPI[i];
 	char buf[BUFFER_SIZE];
-	sprintf(buf, "encflagsync %d\n", local_spi->encrypt_flag);
 	printf("local_encrypt_flag:%d remote_flag:%d\n", local_spi->encrypt_flag, atoi(remote_flag));
+	sprintf(buf, "encflagsync %d\n", local_spi->encrypt_flag);
 	send(fd, buf, BUFFER_SIZE, 0);
 }
 
@@ -1372,7 +1271,7 @@ void *reactor_local_socket(void *arg)
 			{
 				if (fd == local_lfd)
 				{
-					printf("local_connection success!\n");
+					printf("local_connection request:!\n");
 					handler_conreq_unix(local_lfd, epfd); // 处理本地连接请求
 				}
 				else
@@ -1449,7 +1348,7 @@ int main(int argc, char *argv[])
 {
 
 	pthread_rwlock_init(&keywr, NULL); // 初始化读写锁
-	pthread_t writethread;
+	pthread_t writethread[2];
 	char buf[1024], client_ip[1024];
 	if (argc < 2)
 	{
@@ -1467,12 +1366,19 @@ int main(int argc, char *argv[])
 		strcpy(remote_ip, argv[1]);
 		SERV_PORT = atoi(argv[2]);
 	}
-	pthread_create(&writethread, NULL, thread_writesharedkey, NULL); // 密钥写入线程启动
-	pthread_detach(writethread);										// 线程分离
+	pthread_create(&writethread[0], NULL, thread_writesharedkey, NULL); // DH密钥写入线程启动
+	pthread_detach(writethread[0]);										// 线程分离
+	pthread_create(&writethread[1], NULL, thread_writeSAkey, NULL);		// SA密钥写入线程启动
+	pthread_detach(writethread[1]);										// 线程分离
 	epoll_reactor_run(SERV_PORT);										// 启动监听服务器，开始监听密钥请求
-	pthread_rwlock_destroy(&keywr);								// 销毁读写锁
+	pthread_rwlock_destroy(&keywr);										// 销毁读写锁
 	for (int i = 0; i < spiCount; ++i)
 	{ // 释放内存
+		free(dynamicSPI[i]->ekeybuff);
+		free(dynamicSPI[i]->dkeybuff);
+		free(dynamicSPI[i]->olddkeybuff);
+		pthread_mutex_destroy(&(dynamicSPI[i]->mutex));
+		pthread_rwlock_destroy(&(dynamicSPI[i]->rwlock));
 		free(dynamicSPI[i]);
 	}
 	return 0;
