@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-12-24 14:57:56
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2023-12-24 15:08:29
+ * @LastEditTime: 2023-12-28 16:00:53
  * @FilePath: \c\keymanage\project2\km.h
  * @Description: 
  * 
@@ -38,7 +38,7 @@
 #include <sys/types.h>
 
 // 解密派生参数队列长度
-#define MAX_QUEUE_SIZE 100
+#define MAX_QUEUE_SIZE 1000
 #define OTPTH 128					// OTP原始密钥上界128字节
 
 typedef struct
@@ -78,7 +78,7 @@ void enqueue(Queue *queue, int value)
 {
 	if (isFull(queue))
 	{
-		printf("Queue is full. Cannot enqueue.\n");
+		perror("Queue is full. Cannot enqueue.\n");
 		return;
 	}
 	else if (isEmpty(queue))
@@ -99,7 +99,7 @@ int dequeue(Queue *queue)
 	int value;
 	if (isEmpty(queue))
 	{
-		printf("Queue is empty. Cannot dequeue.\n");
+		perror("Queue is empty. Cannot dequeue.\n");
 		return -1; // 代表出队失败
 	}
 	else if (queue->front == queue->rear)
@@ -183,7 +183,7 @@ void renewkey(SpiParams *local_spi);
 
 void readFilesInFolder(const char *folderPath,FILE* fp);
 
-void keyfile_write();
+void *thread_writeSAkey(void *args);
 
 void *thread_writesharedkey(void *args);
 
