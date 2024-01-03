@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-12-24 14:57:56
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2023-12-28 16:00:53
+ * @LastEditTime: 2024-01-03 11:36:46
  * @FilePath: \c\keymanage\project2\km.h
  * @Description: 
  * 
@@ -140,6 +140,7 @@ typedef struct SpiParams
 	int ekey_rw, dkey_lw, dkey_rw; // 加密右窗口，解密左窗口，解密右窗口
 	pthread_rwlock_t rwlock;		   // 读写锁变量
 	pthread_mutex_t mutex;			//互斥锁变量
+	struct timeval pre_t, cur_t;	//更新时间变量
 }SpiParams;
 
 
@@ -195,11 +196,9 @@ void getsharedkey_handle(const char *keylen, int fd);
 
 void getsk_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd);
 
-void *getsk_handle_thread(void *args);
 
 void getotpk_handle(const char *spi, const char *syn, const char *key_type, int fd);
 
-void *getotpk_handle_thread(void *args);
 
 void spiregister_handle(const char *spi, const char *inbound, int fd);
 
@@ -211,7 +210,7 @@ void desync_handle(const char *spi, const char *key_d, int fd);
 
 void eMsync_handle(const char *spi, const char *tmp_eM, int fd);
 
-void *reactor_local_socket(void *arg);
+void *reactor_local_socket();
 
-void epoll_reactor_run(int external_port);
+void *reactor_external_socket();
 
