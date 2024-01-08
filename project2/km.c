@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-03 16:40:19
+ * @LastEditTime: 2024-01-08 17:20:52
  * @FilePath: \c\keymanage\project2\km.c
  * @Description: 
  * 
@@ -673,7 +673,7 @@ void readFilesInFolder(const char *folderPath, FILE *fp)
 	// numFiles==1;保护最后一个密钥文件，有可能正在写入
 	if (numFiles <= 1)
 	{
-		sleep(2);
+		sleep(1);
 		free(fileNames[0]);
 		free(fileNames);
 		return;
@@ -720,7 +720,7 @@ void *thread_writeSAkey(void *args)
 	// 模拟不断写入密钥到密钥池文件
 	while (1)
 	{
-		sleep(1); // 等待1s
+		sleep(0.5); // 等待0.5s
 		for (int i = 0; i < spiCount; i++)
 		{
 			FILE *fp = fopen(dynamicSPI[i]->keyfile, "ab");
@@ -804,7 +804,7 @@ void readsharedkey(char *const buf, int len)
 		{
 			printf("key supply empty!\n");
 			pthread_rwlock_unlock(&keywr); // 解锁
-			sleep(2);
+			sleep(1);
 			pthread_rwlock_rdlock(&keywr); // 上读锁
 			printf("key require try again!\n");
 		}
@@ -844,7 +844,7 @@ void readSAkey(SpiParams *local_spi, char *const buf, int len)
 		{
 			printf("key supply empty!\n");
 			pthread_rwlock_unlock(&local_spi->rwlock); // 解锁
-			sleep(2);
+			sleep(1);
 			pthread_rwlock_rdlock(&local_spi->rwlock); // 上读锁
 			printf("key require try again!\n");
 		}
@@ -890,8 +890,8 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	SpiParams *local_spi = dynamicSPI[i];
 	int seq = atoi(syn);
 	int len = atoi(keylen);
-	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
-	if (seq == 1)
+	// 判断syn是否为1，且是加密方,是则进行加解密关系同步，否则不需要同步
+	if (seq == 1&&  atoi(key_type) == 0 )
 	{
 		if (!encflag_sync(local_spi))
 		{
@@ -929,7 +929,13 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	{
 	loop1:
 		if (seq > local_spi->dkey_rw)
-		{ // 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,
+		{ 
+			if(isEmpty(&local_spi->myQueue))
+			{//先判断队列是否为空，如果是空，说明参数还未到达队列，进行一定时间的等待
+				sleep(0.01);
+				goto loop1;
+			}
+			// 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,
 			memcpy(local_spi->old_dkey, local_spi->raw_dkey, len);
 			readSAkey(local_spi, local_spi->raw_dkey, len); // 读取密钥
 			// 更新窗口
@@ -971,8 +977,8 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 	}
 	SpiParams *local_spi = dynamicSPI[i];
 	int seq = atoi(syn);
-	// 判断syn是否为1，是则进行加解密关系同步，否则不需要同步
-	if (seq == 1)
+	// 判断syn是否为1，且是加密方，是则进行加解密关系同步，否则不需要同步
+	if (seq == 1 &&  atoi(key_type) == 0)
 	{
 		if (!encflag_sync(local_spi))
 		{
@@ -994,7 +1000,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 	{ // 加密密钥
 		int ekey_rw = local_spi->ekey_rw;
 		if (seq > ekey_rw)
-		{ // 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口
+		{ //// 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
 			if (local_spi->ekeybuff != NULL)
 				free(local_spi->ekeybuff);
 			local_spi->ekeybuff = (Keyblock *)malloc(WINSIZE * sizeof(Keyblock));
@@ -1010,12 +1016,19 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 		// 解锁
 
 		memcpy(buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].key, local_spi->ekeybuff[(seq - 1) % WINSIZE].size);
+		printf("qkey:%s size:%d sei:%d\n",buf,local_spi->ekeybuff[(seq - 1) % WINSIZE].size,local_spi->keyindex);
+		send(fd, buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].size, 0);
 	}
 	else
 	{ // 解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
 	loop2:
 		if (seq > local_spi->dkey_rw)
-		{ // 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
+		{  	if(isEmpty(&local_spi->myQueue))
+			{//先判断队列是否为空，如果是空，说明参数还未到达队列，进行一定时间的等待
+				sleep(0.01);
+				goto loop2;
+			}
+			// 如果还没有初始的密钥或者超出密钥服务范围需要更新原始密钥以及syn窗口,协商新的密钥派生参数
 			if (local_spi->olddkeybuff != NULL)
 				free(local_spi->olddkeybuff);
 			local_spi->olddkeybuff = local_spi->dkeybuff;
@@ -1035,14 +1048,17 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 		if (seq >= local_spi->dkey_lw)
 		{
 			memcpy(buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].key, local_spi->dkeybuff[(seq - 1) % WINSIZE].size); // 正常数据包
+			printf("qkey:%s size:%d sei:%d\n",buf,local_spi->dkeybuff[(seq - 1) % WINSIZE].size,local_spi->keyindex);
+			send(fd, buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].size, 0);
 		}
 		else
 		{
 			memcpy(buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].key, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size); // 乱序数据包
+			printf("qkey:%s size:%d sei:%d\n",buf,local_spi->olddkeybuff[(seq - 1) % WINSIZE].size,local_spi->keyindex);
+			send(fd, buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size, 0);
 		}
 	}
-	printf("qkey:%s size:%d sei:%d\n",buf,local_spi->eM,local_spi->keyindex);
-	send(fd, buf, buf_size, 0);
+	
 }
 
 /**
@@ -1113,7 +1129,7 @@ void encflag_handle(const char *spi, const char *remote_flag, int fd)
 	char buf[BUFFER_SIZE];
 	printf("local_encrypt_flag:%d remote_flag:%d\n", local_spi->encrypt_flag, atoi(remote_flag));
 	sprintf(buf, "encflagsync %d\n", local_spi->encrypt_flag);
-	send(fd, buf, BUFFER_SIZE, 0);
+	send(fd, buf, strlen(buf), 0);
 }
 
 /**
@@ -1137,7 +1153,7 @@ void keysync_handle(const char *spi, const char *global_index, int fd)
 	local_spi->key_sync_flag = true;
 	char buf[BUFFER_SIZE];
 	sprintf(buf, "keyindexsync %d\n", keyindex + delkeyindex);
-	send(fd, buf, BUFFER_SIZE, 0);
+	send(fd, buf, strlen(buf), 0);
 }
 
 /**
