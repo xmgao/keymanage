@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-11 19:23:17
+ * @LastEditTime: 2024-01-14 16:27:26
  * @FilePath: \c\keymanage\project2\km.c
  * @Description:
  *
@@ -213,7 +213,7 @@ void handler_conreq_tcp(int fd, int epfd)
 	int client_addr_size, ret;
 	struct epoll_event tep;
 	int ar = accept(fd, (struct sockaddr *)(&cli_addr), &client_addr_size);
-	printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)), ntohs(cli_addr.sin_port));
+	//printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)), ntohs(cli_addr.sin_port));
 	// 设置ar socket非阻塞
 	int flag = fcntl(ar, F_GETFL);
 	flag |= O_NONBLOCK;
@@ -251,7 +251,7 @@ void handler_conreq_unix(int fd, int epfd)
 	}
 	else
 	{
-		printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
+		//printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
 	}
 
 	// 设置 ar socket 非阻塞
@@ -320,7 +320,7 @@ void handler_recdata_unix(int fd, int epfd)
 		{
 			buffer[bytesRead - 1] = '\0'; // 将换行符替换为字符串结束符
 		}
-		printf("Received data from socket: %s\n", buffer);
+		//printf("Received data from socket: %s\n", buffer);
 		// 对应于getk  arg1=keylen(字节)
 		// 对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype(0解密；1解密)
 		// 对应于getotpk arg1==spi, arg2=syn,arg3=keytype //如果是解密spi则需要ntohl转换
@@ -383,7 +383,7 @@ void handler_recdata_tcp(int fd, int epfd)
 		// 处理读取到的数据
 		if (buffer[bytesRead - 1] == '\n')
 			buffer[bytesRead - 1] = '\0';
-		printf("recieve:%s\n", buffer);
+		//printf("recieve:%s\n", buffer);
 		// 对应于keyindexsync  arg1=spi, arg2=global_keyindex
 		// 对应于SAkeysync  arg1=remotekeyindex
 		// 对应于encflagsync arg1==spi arg2=encrypt_flag
@@ -612,7 +612,6 @@ bool eM_sync(SpiParams *local_spi)
 		perror("eM_sync send error!\n");
 		return false;
 	}
-	close(fd);
 	local_spi->eM = tmp_eM;
 	return true;
 }
@@ -690,7 +689,7 @@ void readFilesInFolder(const char *folderPath, FILE *fp)
 	dir = opendir(folderPath);
 	if (dir == NULL)
 	{
-		printf("\n");
+		perror("null folderpath!");
 		return;
 	}
 	// 最多100个密钥文件，100k
@@ -930,6 +929,7 @@ void getsharedkey_handle(const char *keylen, int fd)
 	}
 	// 读取密钥
 	readsharedkey(buf, len);
+	//printf("qkey:%s size:%d sei:%d\n", buf, len, SAkeyindex);
 	send(fd, buf, len, 0);
 }
 
@@ -1017,7 +1017,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			memcpy(buf, local_spi->old_dkey, len); // 乱序数据包
 		}
 	}
-	printf("qkey:%s size:%d sei:%d\n", buf, len, local_spi->keyindex);
+	//printf("qkey:%s size:%d sei:%d\n", buf, len, local_spi->keyindex);
 	send(fd, buf, len, 0);
 }
 
@@ -1078,7 +1078,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 		// 解锁
 
 		memcpy(buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].key, local_spi->ekeybuff[(seq - 1) % WINSIZE].size);
-		printf("qkey:%s size:%d sei:%d\n", buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
+		//printf("qkey:%s size:%d sei:%d\n", buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
 		send(fd, buf, local_spi->ekeybuff[(seq - 1) % WINSIZE].size, 0);
 	}
 	else
@@ -1111,13 +1111,13 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 		if (seq >= local_spi->dkey_lw)
 		{
 			memcpy(buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].key, local_spi->dkeybuff[(seq - 1) % WINSIZE].size); // 正常数据包
-			printf("qkey:%s size:%d sei:%d\n", buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
+			//printf("qkey:%s size:%d sei:%d\n", buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
 			send(fd, buf, local_spi->dkeybuff[(seq - 1) % WINSIZE].size, 0);
 		}
 		else
 		{
 			memcpy(buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].key, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size); // 乱序数据包
-			printf("qkey:%s size:%d sei:%d\n", buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
+			//printf("qkey:%s size:%d sei:%d\n", buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size, local_spi->keyindex);
 			send(fd, buf, local_spi->olddkeybuff[(seq - 1) % WINSIZE].size, 0);
 		}
 	}
@@ -1390,7 +1390,7 @@ int main(int argc, char *argv[])
 	snprintf(command, sizeof(command), "rm -rf %s", keypool_path);
 	system(command);
 	// 创建文件夹
-	if (mkdir(keypool_path, 0777) != 0)
+	if (mkdir(keypool_path, 777) != 0)
 	{
 		perror("mkdir");
 		exit(EXIT_FAILURE);
