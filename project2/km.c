@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-14 16:27:26
+ * @LastEditTime: 2024-01-24 17:34:59
  * @FilePath: \c\keymanage\project2\km.c
  * @Description:
  *
@@ -14,17 +14,16 @@
 //  编译: gcc km.c -o km -g -pthread
 // 运行 sudo ./km remoteip >testlog 2> errlog
 
-#define MAX_EVENTS 128	// 最大监听数量
+#define MAX_EVENTS 10000	// 最大监听数量
 #define BUFFER_SIZE 128 // 普通数据包缓冲区最大长度
 #define buf_size 1548	// OTP数据包缓冲区最大长度，应该为一个MTU加上完整性保护密钥的字节数
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define socket_path "/tmp/my_socket"  // 定义本地套接字路径
 #define EXTERNAL_PORT 50001			  // 默认服务器外部监听端口
-#define MAX_KEYFILE_SIZE 1024 * 1024  // 最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 1M
-#define KEY_CREATE_RATE 1024		  // 密钥每秒生成长度 1kBps
+#define MAX_KEYFILE_SIZE 20*1024 * 1024  // 最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 20M
 #define keypool_path "keypool"		  // 定义本地密钥池文件夹
-#define KEY_FILE "keyfile.kf"		  // dh,psk密钥文件
+#define KEY_FILE "keyfile.kf"	  // dh,psk密钥文件
 #define TEMPKEY_FILE "tempkeyfile.kf" // 临时密钥文件
 #define INIT_KEYD 100				  // 初始密钥派生参数
 #define INIT_KEYM 16				  // 初始OTP密钥块阈值16字节
@@ -36,6 +35,7 @@
 #define MAX_DYNAMIC_SPI_COUNT 100	  // 最多同时存在SPI个数
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
+int key_creat_rate;		//密钥产生速率全局变量
 int SAkeyindex;			// 用于标识本地SA密钥池索引。
 bool SAkey_sync_flag;	// 密钥同步标志，用于供应sa协商
 int spiCount = 0;		// 当前SPI个数
@@ -586,7 +586,7 @@ bool eM_sync(SpiParams *local_spi)
 	{
 		double duration = (local_spi->cur_t.tv_sec - local_spi->pre_t.tv_sec) + (local_spi->cur_t.tv_usec - local_spi->pre_t.tv_usec) / 1000000.0;
 		int vconsume = WINSIZE * eM / duration; // 密钥消耗速率，单位 字节/s
-		if (vconsume >= KEY_CREATE_RATE / 2)
+		if (vconsume >= key_creat_rate / 2)
 		{
 			tmp_eM = (eM / 2 > 16) ? eM / 2 : 16; // 乘性减少,下界16
 		}
@@ -791,36 +791,82 @@ void *thread_writeSAkey(void *args)
  * @param {void} *args 空参数
  * @return {*}
  */
+// void *thread_writesharedkey(void *args)
+// {
+// 	// 首先定义文件指针：fp
+// 	FILE *fp;
+// 	remove(KEY_FILE);
+// 	printf("sharedkey supply starting...\n");
+// 	// 模拟不断写入密钥到密钥池文件
+// 	srand(666);
+// 	while (1)
+// 	{
+// 		// 再填充sharedkey密钥,写入DH密钥和预共享密钥，为他们单独提供一个密钥池
+// 		unsigned char *buf = (unsigned char *)malloc(key_creat_rate * sizeof(unsigned char));
+// 		for (int i = 0; i < key_creat_rate; i++)
+// 		{ // 随机形成密钥串
+// 			buf[i] = rand() % 256;
+// 		}
+// 		pthread_rwlock_wrlock(&keywr); // 上锁
+// 		fp = fopen(KEY_FILE, "ab");
+// 		fseek(fp, 0, SEEK_END);	  // 定位到文件末
+// 		int nFileLen = ftell(fp); // 文件长度
+// 		// printf("keypoolsize:%d Byetes\n", nFileLen);
+// 		if (nFileLen < MAX_KEYFILE_SIZE)
+// 		{
+// 			fwrite(buf, sizeof(unsigned char), key_creat_rate, fp);
+// 		}
+// 		free(buf);
+// 		fclose(fp);
+// 		pthread_rwlock_unlock(&keywr); // 解锁
+// 		usleep(500000);				   // 等待0.5s
+// 	}
+// 	pthread_exit(0);
+// }
+
+//密钥重放器
 void *thread_writesharedkey(void *args)
 {
-	// 首先定义文件指针：fp
-	FILE *fp;
 	remove(KEY_FILE);
+	// 首先定义文件指针：fp
+	FILE * fp = fopen(KEY_FILE, "ab");
+	fseek(fp, 0, SEEK_END);	  // 定位到文件末
 	printf("sharedkey supply starting...\n");
-	// 模拟不断写入密钥到密钥池文件
-	srand(666);
-	while (1)
-	{
-		// 再填充sharedkey密钥,写入DH密钥和预共享密钥，为他们单独提供一个密钥池
-		unsigned char *buf = (unsigned char *)malloc(KEY_CREATE_RATE * sizeof(unsigned char));
-		for (int i = 0; i < KEY_CREATE_RATE; i++)
-		{ // 随机形成密钥串
-			buf[i] = rand() % 256;
-		}
-		pthread_rwlock_wrlock(&keywr); // 上锁
-		fp = fopen(KEY_FILE, "ab");
-		fseek(fp, 0, SEEK_END);	  // 定位到文件末
-		int nFileLen = ftell(fp); // 文件长度
-		// printf("keypoolsize:%d Byetes\n", nFileLen);
-		if (nFileLen < MAX_KEYFILE_SIZE)
-		{
-			fwrite(buf, sizeof(unsigned char), KEY_CREATE_RATE, fp);
-		}
-		free(buf);
-		fclose(fp);
-		pthread_rwlock_unlock(&keywr); // 解锁
-		usleep(500000);				   // 等待0.5s
-	}
+	FILE *file = fopen("rawkeyfile.kf", "rb"); // 格式化的密钥重放文件
+    if (file == NULL) {
+        perror("Error opening file");
+        pthread_exit(0);
+    }
+    unsigned char block[522]; //8字节时间戳+2字节密钥长度(512字节)+512字节密钥
+    time_t prevTimestamp = 0;
+    while (fread(block, sizeof(char), sizeof(block), file) == sizeof(block)) {
+        // 提取时间戳
+        time_t currentTimestamp;
+        memcpy(&currentTimestamp, block, sizeof(uint64_t));
+         if (prevTimestamp != 0) {
+            //单位纳秒
+            time_t interval = currentTimestamp - prevTimestamp;
+            // 执行操作，暂停指定间隔
+            //printf("Performing operation with interval: %.2f mseconds\n", (float)interval/ 1000000);
+            unsigned char key[512];
+			memcpy(key, block + sizeof(uint64_t)+2, 512);
+			pthread_rwlock_wrlock(&keywr); // 上锁
+			fseek(fp, 0, SEEK_END);	  // 定位到文件末
+			int nFileLen = ftell(fp); // 文件长度
+			if (nFileLen < MAX_KEYFILE_SIZE) {
+				fwrite(key, sizeof(unsigned char), 512, fp);
+			}
+			pthread_rwlock_unlock(&keywr); // 解锁
+            // 按照指定间隔暂停程序执行,微妙
+            usleep((int)(interval / 1000));
+			//此时改变密钥速率
+			key_creat_rate = (int)(512000000/interval); //kbps
+			printf("time:%ld \t key_creat_rate: %d kbps\n", currentTimestamp,key_creat_rate);
+        }
+        prevTimestamp = currentTimestamp;
+    }
+    fclose(file);
+	fclose(fp);
 	pthread_exit(0);
 }
 
@@ -923,7 +969,7 @@ void getsharedkey_handle(const char *keylen, int fd)
 		{
 			perror("SAkey_sync error!\n");
 			char buf2[] = "A";
-			send(fd, buf2, strlen(buf), 0);
+			send(fd, buf2, strlen(buf2), 0);
 			return;
 		}
 	}
@@ -1395,6 +1441,8 @@ int main(int argc, char *argv[])
 		perror("mkdir");
 		exit(EXIT_FAILURE);
 	}
+
+	key_creat_rate=100000; //初始化速率100kbps
 
 	pthread_rwlock_init(&keywr, NULL); // 初始化读写锁
 	pthread_mutex_init(&mutex, NULL);  // 初始化互斥锁

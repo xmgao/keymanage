@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-12-24 14:57:56
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-11 16:49:36
+ * @LastEditTime: 2024-01-24 17:04:52
  * @FilePath: \c\keymanage\project2\km.h
  * @Description:
  *
@@ -29,6 +29,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 // 解密派生参数队列长度
 #define MAX_QUEUE_SIZE 1000
