@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-24 17:34:59
+ * @LastEditTime: 2024-01-25 11:25:21
  * @FilePath: \c\keymanage\project2\km.c
  * @Description:
  *
@@ -1031,8 +1031,8 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			readSAkey(local_spi, local_spi->raw_ekey, len); // 读取SA会话密钥
 			local_spi->ekey_rw += local_spi->cur_ekeyd;
 		}
-
-		memcpy(buf, local_spi->raw_ekey, len);
+		memcpy(buf, local_spi->ekey_rw, sizeof(int));
+		memcpy(buf+sizeof(int), local_spi->raw_ekey, len);
 	}
 	else // 解密密钥:对于解密密钥维护一个旧密钥的窗口来暂存过去的密钥以应对失序包。
 	{
