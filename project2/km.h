@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-12-24 14:57:56
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-01-24 17:04:52
+ * @LastEditTime: 2024-05-30 20:29:45
  * @FilePath: \c\keymanage\project2\km.h
  * @Description:
  *
@@ -121,6 +121,7 @@ typedef struct
 typedef struct SpiParams
 {
 	int spi;												   // SPI值，用数字表示
+	int encalg;											   // 当前加密算法值，用数字表示，0表示暂无，1表示动态派生，2表示一次一密
 	bool in_bound;											   // true如果是入站SPI
 	char keyfile[100];										   // spi对应的密钥池文件名
 	bool key_sync_flag;										   // 密钥索引同步标志
