@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-05-30 20:52:58
+ * @LastEditTime: 2024-07-04 16:24:28
  * @FilePath: \c\keymanage\project2\km.c
  * @Description:
  *
@@ -11,7 +11,7 @@
 
 #include "km.h"
 
-//  编译: gcc km.c -o km -g -pthread
+//  编译: gcc km.c -o km -g -pthread -lssl -lcrypto
 // 运行 sudo ./km remoteip >testlog 2> errlog
 
 #define MAX_EVENTS 10000 // 最大监听数量
@@ -19,20 +19,28 @@
 #define buf_size 1548	 // OTP数据包缓冲区最大长度，应该为一个MTU加上完整性保护密钥的字节数
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 #define min(a, b) (((a) < (b)) ? (a) : (b))
-#define socket_path "/tmp/my_socket"	  // 定义本地套接字路径
-#define EXTERNAL_PORT 50001				  // 默认服务器外部监听端口
-#define MAX_KEYFILE_SIZE 20 * 1024 * 1024 // 最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 20M
-#define keypool_path "keypool"			  // 定义本地密钥池文件夹
-#define KEY_FILE "keyfile.kf"			  // dh,psk密钥文件
-#define TEMPKEY_FILE "tempkeyfile.kf"	  // 临时密钥文件
-#define INIT_KEYD 100					  // 初始密钥派生参数
-#define INIT_KEYM 16					  // 初始OTP密钥块阈值16字节
-#define up_index 2						  // 派生增长因子
-#define down_index 500					  // 派生减少因子
-#define LT 0.2							  // 下界
-#define HT 0.7							  // 上界
-#define WINSIZE 4096					  // 密钥窗口大小
-#define MAX_DYNAMIC_SPI_COUNT 100		  // 最多同时存在SPI个数
+#define socket_path "/tmp/my_socket"				// 定义本地套接字路径
+#define EXTERNAL_PORT 50001							// 默认服务器外部监听端口
+#define MAX_KEYFILE_SIZE 200 * 1024 * 1024			// 最大密钥文件大小，当密钥文件大于最大限制时，不再填充密钥 200M
+#define keypool_path "keypool"						// 定义本地密钥池文件夹
+#define KEY_FILE "keyfile.kf"						// dh,psk密钥文件
+#define TEMPKEY_FILE "tempkeyfile.kf"				// 临时密钥文件
+#define INIT_KEYD 100								// 初始密钥派生参数
+#define INIT_KEYM 16								// 初始OTP密钥块阈值16字节
+#define up_index 2									// 派生增长因子
+#define down_index 500								// 派生减少因子
+#define LT 0.2										// 下界
+#define HT 0.7										// 上界
+#define WINSIZE 4096								// 密钥窗口大小
+#define MAX_DYNAMIC_SPI_COUNT 100					// 最多同时存在SPI个数
+#define HMAC_KEY "7890ABCDEF1234567890ABCDEF123456" // HMAC密钥
+
+#define METHOD_SIZE 32
+#define DATA_SIZE 64
+#define HMAC_SIZE 32
+#define PACKET_SIZE (METHOD_SIZE + DATA_SIZE + HMAC_SIZE)
+
+#define DEBUG_LEVEL 1
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
 int key_creat_rate;		// 密钥产生速率全局变量
@@ -43,6 +51,111 @@ pthread_rwlock_t keywr; // 共享密钥池的读写锁
 pthread_mutex_t mutex;	// 共享密钥池的读写锁
 int SERV_PORT;			// 服务器监听端口
 char remote_ip[32];		// 记录远程ip地址
+
+void create_hmac_packet(const char *method, const char data[][17], int data_count, unsigned char *packet)
+{
+	// 清空数据包
+	memset(packet, 0, PACKET_SIZE);
+
+	// 填充method
+	strncpy((char *)packet, method, METHOD_SIZE);
+
+	// 填充数据
+	for (int i = 0; i < data_count && i < 10; i++)
+	{
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("data[%d]: %s (line %d)\n", i, data[i], __LINE__);
+		}
+
+		strncpy((char *)(packet + METHOD_SIZE + i * 16), data[i], 16);
+		// 确保字符串以null结尾
+		packet[METHOD_SIZE + i * 16 + 16] = '\0';
+	}
+
+	//  计算HMAC
+	unsigned char hmac_result[HMAC_SIZE];
+	unsigned int len = HMAC_SIZE;
+	HMAC(EVP_sha256(), HMAC_KEY, strlen(HMAC_KEY), packet, METHOD_SIZE + DATA_SIZE, hmac_result, &len);
+	// 将HMAC结果直接添加到数据包末尾
+	memcpy(packet + METHOD_SIZE + DATA_SIZE, hmac_result, HMAC_SIZE);
+}
+
+int verify_hmac_packet(const unsigned char *packet)
+{
+	unsigned char expected_hmac[HMAC_SIZE];
+	unsigned int len = HMAC_SIZE;
+
+	// 计算期望的HMAC
+	HMAC(EVP_sha256(), HMAC_KEY, strlen(HMAC_KEY), packet, METHOD_SIZE + DATA_SIZE, expected_hmac, &len);
+
+	// 比较期望的HMAC和接收到的HMAC
+	return memcmp(expected_hmac, packet + METHOD_SIZE + DATA_SIZE, HMAC_SIZE) == 0;
+}
+
+// // 封装HMAC签名
+// void hmac_sign(const char *message, char *signed_message)
+// {
+// 	unsigned char hmac_result[EVP_MAX_MD_SIZE];
+// 	unsigned int hmac_len;
+
+// 	// 计算HMAC
+// 	HMAC_CTX *ctx = HMAC_CTX_new();
+// 	HMAC_Init_ex(ctx, HMAC_KEY, strlen(HMAC_KEY), EVP_sha256(), NULL);
+// 	HMAC_Update(ctx, (unsigned char *)message, strlen(message));
+// 	HMAC_Final(ctx, hmac_result, &hmac_len);
+// 	HMAC_CTX_free(ctx);
+
+// 	// 将HMAC附加到消息中
+// 	strcpy(signed_message, message);
+// 	char hmac_hex[EVP_MAX_MD_SIZE * 2 + 1];
+// 	for (int i = 0; i < hmac_len; i++)
+// 	{
+// 		sprintf(&hmac_hex[i * 2], "%02hhx", hmac_result[i]);
+// 	}
+// 	strcat(signed_message, hmac_hex);
+// }
+
+// // 验证签名解封装
+// bool hmac_verify(const char *signed_message, char *original_message)
+// {
+// 	unsigned int hmac_len = EVP_MD_size(EVP_sha256());
+// 	unsigned int message_len = strlen(signed_message) - hmac_len * 2;
+
+// 	// 提取原始消息
+// 	strncpy(original_message, signed_message, message_len);
+// 	original_message[message_len] = '\0';
+
+// 	// 提取接收到的HMAC
+// 	char received_hmac_hex[EVP_MAX_MD_SIZE * 2 + 1];
+// 	strncpy(received_hmac_hex, signed_message + message_len, hmac_len * 2);
+// 	received_hmac_hex[hmac_len * 2] = '\0';
+
+// 	unsigned char received_hmac[EVP_MAX_MD_SIZE];
+// 	for (int i = 0; i < hmac_len; i++)
+// 	{
+// 		sscanf(&received_hmac_hex[i * 2], "%02hhx", &received_hmac[i]);
+// 	}
+
+// 	// 计算原始消息的HMAC
+// 	unsigned char calculated_hmac[EVP_MAX_MD_SIZE];
+// 	unsigned int calculated_hmac_len;
+// 	HMAC_CTX *ctx = HMAC_CTX_new();
+// 	HMAC_Init_ex(ctx, HMAC_KEY, strlen(HMAC_KEY), EVP_sha256(), NULL);
+// 	HMAC_Update(ctx, (unsigned char *)original_message, strlen(original_message));
+// 	HMAC_Final(ctx, calculated_hmac, &calculated_hmac_len);
+// 	HMAC_CTX_free(ctx);
+
+// 	// 比较HMAC
+// 	if (memcmp(received_hmac, calculated_hmac, hmac_len) == 0)
+// 	{
+// 		return 1; // 验证成功
+// 	}
+// 	else
+// 	{
+// 		return 0; // 验证失败
+// 	}
+// }
 
 /**
  * @description: 本地监听初始化，使用AF_UNIX
@@ -92,7 +205,6 @@ int init_listen_local(int epfd)
 	return unix_sock;
 }
 
-// TODO：需要实现一种访问控制机制，拒绝恶意的IP地址
 /**
  * @description: 外部监听初始化，使用tcp
  * @param {int} port 需要监听的外部端口
@@ -107,8 +219,12 @@ int init_listen_external(int port, int epfd)
 
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_port = htons(port);
-	// 外部监听
-	inet_pton(AF_INET, "0.0.0.0", &serv_addr.sin_addr.s_addr);
+	// 将用户输入的IP地址转换为网络字节序的二进制格式
+	if (inet_pton(AF_INET, "0.0.0.0", &serv_addr.sin_addr) <= 0)
+	{
+		perror("Invalid IP address");
+		exit(EXIT_FAILURE);
+	}
 	lfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (lfd < 0)
 	{
@@ -209,15 +325,43 @@ bool con_unixserv(int *fd)
 void handler_conreq_tcp(int fd, int epfd)
 {
 	struct sockaddr_in cli_addr;
-	char cli_ip[16];
-	int client_addr_size, ret;
+	char cli_ip[INET_ADDRSTRLEN];
+	socklen_t client_addr_size = sizeof(cli_addr);
 	struct epoll_event tep;
+	int ret;
+
 	int ar = accept(fd, (struct sockaddr *)(&cli_addr), &client_addr_size);
-	// printf("ip address is: %s,port is: %d\n", inet_ntop(AF_INET, &cli_addr.sin_addr.s_addr, cli_ip, sizeof(cli_ip)), ntohs(cli_addr.sin_port));
-	//  设置ar socket非阻塞
+	if (ar < 0)
+	{
+		perror("accept error");
+		return;
+	}
+
+	// 获取客户端的 IP 地址
+	if (inet_ntop(AF_INET, &cli_addr.sin_addr, cli_ip, sizeof(cli_ip)) == NULL)
+	{
+		perror("inet_ntop error");
+		close(ar);
+		return;
+	}
+	if (DEBUG_LEVEL == 1)
+	{
+		printf("ip address is: %s, port is: %d\n", cli_ip, ntohs(cli_addr.sin_port));
+	}
+
+	// 检查客户端 IP 地址是否与 remoteip 匹配
+	if (strcmp(cli_ip, remote_ip) != 0)
+	{
+		printf("Rejected connection from: %s\n", cli_ip);
+		close(ar);
+		return;
+	}
+
+	// 设置 ar socket 非阻塞
 	int flag = fcntl(ar, F_GETFL);
 	flag |= O_NONBLOCK;
 	fcntl(ar, F_SETFL, flag);
+
 	// 事件赋值
 	tep.events = EPOLLIN;
 	tep.data.fd = ar;
@@ -226,7 +370,8 @@ void handler_conreq_tcp(int fd, int epfd)
 	ret = epoll_ctl(epfd, EPOLL_CTL_ADD, ar, &tep);
 	if (ret == -1)
 	{
-		perror("epoll_ctl_add error!\n");
+		perror("epoll_ctl_add error");
+		close(ar);
 		exit(1);
 	}
 }
@@ -248,10 +393,6 @@ void handler_conreq_unix(int fd, int epfd)
 	{
 		perror("accept unix error");
 		// 处理错误
-	}
-	else
-	{
-		// printf("Unix domain socket path is: %s\n", cli_addr.sun_path);
 	}
 
 	// 设置 ar socket 非阻塞
@@ -320,7 +461,11 @@ void handler_recdata_unix(int fd, int epfd)
 		{
 			buffer[bytesRead - 1] = '\0'; // 将换行符替换为字符串结束符
 		}
-		// printf("Received data from socket: %s\n", buffer);
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("Received data from socket: %s\n", buffer);
+		}
+
 		//  对应于getk  arg1=keylen(字节)
 		//  对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype(0解密；1解密)
 		//  对应于getotpk arg1==spi, arg2=syn,arg3=keytype //如果是解密spi则需要ntohl转换
@@ -363,34 +508,47 @@ void handler_recdata_unix(int fd, int epfd)
 void handler_recdata_tcp(int fd, int epfd)
 {
 
-	char buffer[BUFFER_SIZE];
+	char received_packet[PACKET_SIZE];
 	// 清空缓冲区
-	memset(buffer, 0, BUFFER_SIZE);
-	// tcpsockfd 上有数据到达
-	ssize_t bytesRead = read(fd, buffer, BUFFER_SIZE);
-	if (bytesRead == -1)
+	memset(received_packet, 0, PACKET_SIZE);
+	ssize_t bytesRead;
+
+	bytesRead = read(fd, received_packet, PACKET_SIZE);
+
+	if (bytesRead <= 0)
 	{
-		perror("Failed to read data from sockfd");
-		exit(EXIT_FAILURE);
+		perror("read error");
+		discon(fd, epfd);
 	}
-	else if (bytesRead == 0)
+	else if (!verify_hmac_packet(received_packet))
 	{
-		// 连接关闭，进行相应处理
+		printf("HMAC verify failed! (line %d)\n", __LINE__);
 		discon(fd, epfd);
 	}
 	else
 	{
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("HMAC verify success! (line %d)\n", __LINE__);
+		}
+
 		// 处理读取到的数据
-		if (buffer[bytesRead - 1] == '\n')
-			buffer[bytesRead - 1] = '\0';
-		// printf("recieve:%s\n", buffer);
 		//  对应于keyindexsync  arg1=spi, arg2=global_keyindex
 		//  对应于SAkeysync  arg1=remotekeyindex
-		//  对应于encflagsync arg1==spi arg2=encrypt_flag
+		//  对应于encflagsync arg1==spi arg2=inbound
 		//  对应于derive_sync  arg1==spi arg2==key_d
 		//  对应于eM_sync  arg1==spi arg2==tem_eM
+
+		// 解析method
 		HandleData data1;
-		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", data1.method, data1.arg1, data1.arg2, data1.arg3, data1.arg4);
+		memset(&data1, 0, sizeof(HandleData));
+		strncpy(data1.method, (char *)received_packet, METHOD_SIZE);
+		// 解析数据
+		strncpy(data1.arg1, (char *)(received_packet + METHOD_SIZE), 16);
+		strncpy(data1.arg2, (char *)(received_packet + METHOD_SIZE + 16 * 1), 16);
+		strncpy(data1.arg3, (char *)(received_packet + METHOD_SIZE + 16 * 2), 16);
+		strncpy(data1.arg4, (char *)(received_packet + METHOD_SIZE + 16 * 3), 16);
+
 		if (strncasecmp(data1.method, "keyindexsync", 12) == 0)
 		{
 			keysync_handle(data1.arg1, data1.arg2, fd);
@@ -416,7 +574,7 @@ void handler_recdata_tcp(int fd, int epfd)
 		}
 		else
 		{
-			printf("invalid recdata:%s\n", buffer);
+			printf("invalid recdata\n");
 			discon(fd, epfd);
 		}
 	}
@@ -431,8 +589,7 @@ void handler_recdata_tcp(int fd, int epfd)
 bool encflag_sync(SpiParams *local_spi)
 {
 	int spi = local_spi->spi;
-	int local_flag = local_spi->encrypt_flag;
-	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
+	int local_flag = local_spi->in_bound;
 	int fd, ret, remote_flag;
 	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
 	{
@@ -440,41 +597,106 @@ bool encflag_sync(SpiParams *local_spi)
 		return false;
 	}
 	printf("spi:%d\tencrypt_flag:%d\n", spi, local_flag);
-	sprintf(buf, "encflagsync %d %d\n", spi, local_flag);
-	send(fd, buf, strlen(buf), 0);
 
-	ret = read(fd, rbuf, sizeof(rbuf));
-	sscanf(rbuf, "%[^ ] %d", method, &remote_flag); // scanf("%[^\n] ", s); 输入一行，回车作为结束符。 行末回车符不处理; %[^ ]表示除了空格都可以读
-	close(fd);
-	if (local_flag ^ remote_flag == 1)
-		return true;
-	return false;
+	const char *method = "encflagsync";
+	char data[2][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", spi);
+	snprintf(data[1], 17, "%d", local_flag);
+	create_hmac_packet(method, data, 2, packet);
+	send(fd, packet, PACKET_SIZE, 0);
+
+	// 接收消息时
+	char received_packet[PACKET_SIZE];
+	read(fd, received_packet, PACKET_SIZE);
+
+	// 验证HMAC
+	if (verify_hmac_packet(received_packet))
+	{
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("HMAC verify success! (line %d)\n", __LINE__);
+		}
+		// 解析method
+		char method[METHOD_SIZE + 1] = {0};
+		strncpy(method, (char *)received_packet, METHOD_SIZE);
+		//  解析数据
+		char param1[17] = {0};
+		strncpy(param1, (char *)(received_packet + METHOD_SIZE), 16);
+		sscanf(param1, "%d", &remote_flag);
+		close(fd);
+		if (local_flag ^ remote_flag == 1)
+			return true;
+	}
+	else
+	{
+		printf("HMAC verify failed! (line %d)\n", __LINE__);
+		close(fd);
+		return false;
+	}
 }
 
 // SA密钥同步,本地与远端服务器尝试建立连接同步密钥偏移
-bool SAkey_sync()
+bool IKESAkey_sync()
 {
-	int fd, ret;
-	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
+	int fd, ret, remote_keyindex;
 	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
 	{
 		perror("SAkeysync connect error!\n");
 		return false;
 	}
-	sprintf(buf, "SAkeysync %d\n", IKEkeyindex);
-	ret = send(fd, buf, strlen(buf), 0);
-	if (ret < 0)
+
+	const char *method = "SAkeysync";
+	char data[1][17];
+	memset(data, 0, sizeof(data));
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", IKEkeyindex);
+	// 打印调试信息
+	if (DEBUG_LEVEL == 1)
 	{
-		perror("SAkeysync send error!\n");
+		printf("begin create hmac packet! (line %d)\n", __LINE__);
+		printf("data[0]: %s\n", data[0]);
+		printf("method: %s\n", method);
+	}
+
+	create_hmac_packet(method, data, 1, packet);
+	send(fd, packet, PACKET_SIZE, 0);
+	//  接收消息时
+	char received_packet[PACKET_SIZE];
+	read(fd, received_packet, PACKET_SIZE);
+
+	// 验证HMAC
+	if (verify_hmac_packet(received_packet))
+	{
+		// 解析method
+		char method[METHOD_SIZE + 1] = {0};
+		strncpy(method, (char *)received_packet, METHOD_SIZE);
+		//  解析数据
+		char param1[17] = {0};
+		strncpy(param1, (char *)(received_packet + METHOD_SIZE), 16);
+
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("HMAC verify success! (line %d)\n", __LINE__);
+			printf("Method: %s \t param1:%s\n", method, param1);
+		}
+
+		sscanf(param1, "%d", &remote_keyindex);
+		IKEkeyindex = max(IKEkeyindex, remote_keyindex);
+		SAkey_sync_flag = true;
+		close(fd);
+		return true;
+	}
+	else
+	{
+		printf("HMAC verify failed!\n");
+		close(fd);
 		return false;
 	}
-	ret = read(fd, rbuf, sizeof(rbuf));
-	int remote_keyindex;
-	sscanf(rbuf, "%[^ ] %d", method, &remote_keyindex);
-	IKEkeyindex = max(IKEkeyindex, remote_keyindex);
-	SAkey_sync_flag = true;
-	close(fd);
-	return true;
 }
 
 /**
@@ -489,27 +711,54 @@ bool key_index_sync(SpiParams *local_spi)
 	int local_delkeyindex = local_spi->delkeyindex;
 
 	int fd, ret;
-	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
-
+	int global_keyindex;
 	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
 	{
 		perror("keyindexsync connect error!\n");
 		return false;
 	}
-	sprintf(buf, "keyindexsync %d %d\n", spi, local_keyindex + local_delkeyindex);
-	ret = send(fd, buf, strlen(buf), 0);
-	if (ret < 0)
+
+	const char *method = "SAkeyindexsync";
+	char data[2][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", spi);
+	snprintf(data[1], 17, "%d", local_keyindex + local_delkeyindex);
+	create_hmac_packet(method, data, 2, packet);
+	send(fd, packet, PACKET_SIZE, 0);
+
+	// 接收消息时
+	char received_packet[PACKET_SIZE];
+	read(fd, received_packet, PACKET_SIZE);
+
+	// 验证HMAC
+	if (verify_hmac_packet(received_packet))
 	{
-		perror("keyindex_sync connect error!\n");
+
+		// 解析method
+		char method[METHOD_SIZE + 1] = {0};
+		strncpy(method, (char *)received_packet, METHOD_SIZE);
+		//  解析数据
+		char param1[17] = {0};
+		strncpy(param1, (char *)(received_packet + METHOD_SIZE), 16);
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("HMAC verify success! (line %d)\n", __LINE__);
+			printf("Method: %s param1:%s\n", method, param1);
+		}
+		sscanf(param1, "%d", &global_keyindex);
+		close(fd);
+		local_spi->keyindex = max(local_keyindex + local_delkeyindex, global_keyindex) - local_delkeyindex;
+		local_spi->key_sync_flag = true;
+		return true;
+	}
+	else
+	{
+		printf("HMAC verify failed!\n");
+		close(fd);
 		return false;
 	}
-	ret = read(fd, rbuf, sizeof(rbuf));
-	int global_keyindex;
-	sscanf(rbuf, "%[^ ] %d", method, &global_keyindex); // 修改
-	close(fd);
-	local_spi->keyindex = max(local_keyindex + local_delkeyindex, global_keyindex) - local_delkeyindex;
-	local_spi->key_sync_flag = true;
-	return true;
 }
 
 bool derive_sync(SpiParams *local_spi)
@@ -518,7 +767,6 @@ bool derive_sync(SpiParams *local_spi)
 	gettimeofday(&local_spi->cur_t, NULL);
 	static int fd = -1;
 	int ret, tmp_keyd;
-	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
 	int next_ekeyd = local_spi->cur_ekeyd;
 	// 通过密钥余量判断接下来的密钥派生参数
 	FILE *fp;
@@ -553,7 +801,6 @@ bool derive_sync(SpiParams *local_spi)
 		}
 	}
 
-	sprintf(buf, "desync %d %d\n", local_spi->spi, tmp_keyd);
 	// 还未发起过连接
 	if (fd == -1)
 	{ // 连接对方服务器
@@ -563,7 +810,17 @@ bool derive_sync(SpiParams *local_spi)
 			return false;
 		}
 	}
-	ret = send(fd, buf, strlen(buf), 0);
+	// 发送消息时
+	const char *method = "desync";
+	char data[2][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", local_spi->spi);
+	snprintf(data[1], 17, "%d", tmp_keyd);
+	create_hmac_packet(method, data, 2, packet);
+	ret = send(fd, packet, PACKET_SIZE, 0);
+
 	if (ret < 0)
 	{
 		perror("derive_sync send error!\n");
@@ -572,58 +829,6 @@ bool derive_sync(SpiParams *local_spi)
 	local_spi->cur_ekeyd = tmp_keyd;
 	return true;
 }
-/**
- * @description: // 密钥派生参数协商 版本2，只按照密钥池阈值变化
- * @param {SpiParams *} local_spi 本地spi参数的指针
- * @return {*} TRUE if密钥派生参数协商成功
- */
-// bool derive_sync(SpiParams *local_spi)
-// {
-// 	int spi = local_spi->spi;
-// 	static int fd = -1;
-// 	int ret, tmp_keyd;
-// 	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
-// 	int next_ekeyd = local_spi->cur_ekeyd;
-// 	// 通过密钥余量判断接下来的密钥派生参数
-// 	FILE *fp;
-// 	fp = fopen(KEY_FILE, "rb");
-// 	fseek(fp, 0, SEEK_END);	  // 定位到文件末
-// 	int nFileLen = ftell(fp); // 文件长度
-// 	fclose(fp);
-// 	// 判断净密钥池大小
-// 	int poolsize = (nFileLen - 1 * local_spi->keyindex);
-// 	if (poolsize < LT * MAX_KEYFILE_SIZE)
-// 	{
-// 		tmp_keyd = (next_ekeyd * up_index) < 10000 ? next_ekeyd * up_index : 10000; // 乘性增加，增大每个密钥保护数据包范围
-// 	}
-// 	else if (poolsize > HT * MAX_KEYFILE_SIZE)
-// 	{
-// 		tmp_keyd = (next_ekeyd - down_index) > 100 ? next_ekeyd - down_index : 100; // 线性减小，减少每个密钥保护数据包范围
-// 	}
-// 	else
-// 	{
-// 		tmp_keyd = next_ekeyd;
-// 	}
-
-// 	sprintf(buf, "desync %d %d\n", spi, tmp_keyd);
-// 	// 还未发起过连接
-// 	if (fd == -1)
-// 	{ // 连接对方服务器
-// 		if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
-// 		{
-// 			perror("derive_sync connect error!\n");
-// 			return false;
-// 		}
-// 	}
-// 	ret = send(fd, buf, strlen(buf), 0);
-// 	if (ret < 0)
-// 	{
-// 		perror("derive_sync send error!\n");
-// 		return false;
-// 	}
-// 	local_spi->cur_ekeyd = tmp_keyd;
-// 	return true;
-// }
 
 /**
  * @description: OTP分组密钥阈值eM更新同步
@@ -655,8 +860,6 @@ bool eM_sync(SpiParams *local_spi)
 			tmp_eM = (eM + 16 < 128) ? eM + 16 : 128; // 加性增加，上界128字节
 		}
 	}
-	char buf[BUFFER_SIZE], rbuf[BUFFER_SIZE], method[32];
-	sprintf(buf, "eMsync %d %d\n", spi, tmp_eM);
 	// 还未发起过连接
 	if (fd == -1)
 	{
@@ -666,7 +869,16 @@ bool eM_sync(SpiParams *local_spi)
 			return false;
 		}
 	}
-	ret = send(fd, buf, strlen(buf), 0);
+	// 发送消息时
+	const char *method = "eMsync";
+	char data[2][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", spi);
+	snprintf(data[1], 17, "%d", tmp_eM);
+	create_hmac_packet(method, data, 2, packet);
+	ret = send(fd, packet, PACKET_SIZE, 0);
 	if (ret < 0)
 	{
 		perror("eM_sync send error!\n");
@@ -676,21 +888,73 @@ bool eM_sync(SpiParams *local_spi)
 	return true;
 }
 
+void *thread_keyschedule(void *args)
+{
+	// 模拟不断写入密钥到密钥池文件
+	while (1)
+	{
+		sleep(30);					// 等待30s
+		int delindex = IKEkeyindex; // 要删除的密钥的索引
+		if (delindex == 0)
+		{
+			continue;
+		}
+		pthread_rwlock_wrlock(&keywr); // 上锁
+		printf("Expired key cleanup starting...\n");
+		FILE *fp = fopen(KEY_FILE, "rb"); // 定位到文件末
+		FILE *fp2 = fopen(TEMPKEY_FILE, "wb");
+		if (fp == NULL || fp2 == NULL)
+		{
+			perror("open keyfile error!\n");
+			exit(1);
+		}
+		else
+		{
+			fseek(fp, delindex * 1, SEEK_SET); // 文件指针偏移到指定位置
+			char buffer[BUFFER_SIZE];
+			size_t bytesRead;
+			while ((bytesRead = fread(buffer, 1, BUFFER_SIZE, fp)) > 0)
+			{
+				fwrite(buffer, 1, bytesRead, fp2);
+			}
+			fclose(fp);
+			fclose(fp2);
+		}
+		remove(KEY_FILE);
+		if (rename(TEMPKEY_FILE, KEY_FILE) == 0)
+		{
+			IKEkeyindex = 0;
+			printf("IKE key pool renew success! \n");
+		}
+		else
+		{
+			perror("rename error!");
+		}
+		pthread_rwlock_unlock(&keywr); // 解锁
+		for (int i = 0; i < spiCount; i++)
+		{
+			renewSAkey(dynamicSPI[i]);
+		}
+	}
+}
+
 /**
  * @description:  更新密钥池，更新删除密钥索引
  * @param {SpiParams *} local_spi 本地spi参数的指针
  * @return {*}
  */
-void renewkey(SpiParams *local_spi)
+void renewSAkey(SpiParams *local_spi)
 {
 	int delindex = local_spi->keyindex; // 要删除的密钥的索引
 	if (delindex == 0)
 	{
 		return;
 	}
+	pthread_rwlock_wrlock(&local_spi->rwlock); // 上写锁
+
 	FILE *fp = fopen(local_spi->keyfile, "rb");
 	FILE *fp2 = fopen(TEMPKEY_FILE, "wb");
-	if (fp == NULL)
+	if (fp == NULL || fp2 == NULL)
 	{
 		perror("open keyfile error!\n");
 		exit(1);
@@ -698,28 +962,27 @@ void renewkey(SpiParams *local_spi)
 	else
 	{
 		fseek(fp, delindex * 1, SEEK_SET); // 文件指针偏移到指定位置
-		char buffer = fgetc(fp);
-		int cnt = 0;
-		while (!feof(fp))
+		char buffer[BUFFER_SIZE];
+		size_t bytesRead;
+		while ((bytesRead = fread(buffer, 1, BUFFER_SIZE, fp)) > 0)
 		{
-			cnt++;
-			fputc(buffer, fp2);
-			buffer = fgetc(fp);
+			fwrite(buffer, 1, bytesRead, fp2);
 		}
+		fclose(fp);
 		fclose(fp2);
 	}
-	fclose(fp);
-	remove(KEY_FILE);
-	if (rename(TEMPKEY_FILE, KEY_FILE) == 0)
+	remove(local_spi->keyfile);
+	if (rename(TEMPKEY_FILE, local_spi->keyfile) == 0)
 	{
 		local_spi->delkeyindex += delindex;
 		local_spi->keyindex = 0;
-		printf("key pool renewed...\ndelkeyindex:%d  keyindex:%d  \n", local_spi->delkeyindex, local_spi->keyindex);
+		printf("key pool renewed...\n SPI:%x delkeyindex:%d  keyindex:%d  \n", htonl(local_spi->spi), local_spi->delkeyindex, local_spi->keyindex);
 	}
 	else
 	{
 		perror("rename error!");
 	}
+	pthread_rwlock_unlock(&local_spi->rwlock); // 解锁
 }
 
 // 比较函数用于排序
@@ -794,7 +1057,11 @@ void readFilesInFolder(const char *folderPath, FILE *fp)
 	// 写入密钥到文件fp内
 	for (int i = 0; i < numFiles - 1; i++)
 	{
-		// printf("filename:%s\n", fileNames[i]);
+		if (DEBUG_LEVEL == 1)
+		{
+			printf("filename:%s\n", fileNames[i]);
+		}
+
 		char kfilePath[256]; //
 		sprintf(kfilePath, "%s/%s", folderPath, fileNames[i]);
 		FILE *file = fopen(kfilePath, "rb");
@@ -816,74 +1083,6 @@ void readFilesInFolder(const char *folderPath, FILE *fp)
 	free(fileNames);
 }
 
-// 为每个spi的密钥池写入密钥
-/**
- * @description:
- * @param {void} *args
- * @return {*}
- */
-void *thread_writeSAkey(void *args)
-{
-
-	printf("spikey supply starting...\n");
-	// 模拟不断写入密钥到密钥池文件
-	while (1)
-	{
-		usleep(500000); // 等待0.5s
-		for (int i = 0; i < spiCount; i++)
-		{
-			FILE *fp = fopen(dynamicSPI[i]->keyfile, "ab");
-			int nFileLen = ftell(fp); // 文件长度
-			if (nFileLen < 10 * MAX_KEYFILE_SIZE)
-			{
-				const char *folderPath = "my_folder";		   // 文件夹路径
-				pthread_rwlock_wrlock(&dynamicSPI[i]->rwlock); // 上写锁
-				readFilesInFolder(folderPath, fp);
-				pthread_rwlock_unlock(&dynamicSPI[i]->rwlock); // 解锁
-			}
-			fclose(fp);
-		}
-	}
-}
-
-/**
- * @description: 	// 模拟不断写入密钥到密钥池文件
- * @param {void} *args 空参数
- * @return {*}
- */
-// void *thread_writesharedkey(void *args)
-// {
-// 	// 首先定义文件指针：fp
-// 	FILE *fp;
-// 	remove(KEY_FILE);
-// 	printf("sharedkey supply starting...\n");
-// 	// 模拟不断写入密钥到密钥池文件
-// 	srand(666);
-// 	while (1)
-// 	{
-// 		// 再填充sharedkey密钥,写入DH密钥和预共享密钥，为他们单独提供一个密钥池
-// 		unsigned char *buf = (unsigned char *)malloc(key_creat_rate * sizeof(unsigned char));
-// 		for (int i = 0; i < key_creat_rate; i++)
-// 		{ // 随机形成密钥串
-// 			buf[i] = rand() % 256;
-// 		}
-// 		pthread_rwlock_wrlock(&keywr); // 上锁
-// 		fp = fopen(KEY_FILE, "ab");
-// 		fseek(fp, 0, SEEK_END);	  // 定位到文件末
-// 		int nFileLen = ftell(fp); // 文件长度
-// 		// printf("keypoolsize:%d Byetes\n", nFileLen);
-// 		if (nFileLen < MAX_KEYFILE_SIZE)
-// 		{
-// 			fwrite(buf, sizeof(unsigned char), key_creat_rate, fp);
-// 		}
-// 		free(buf);
-// 		fclose(fp);
-// 		pthread_rwlock_unlock(&keywr); // 解锁
-// 		usleep(500000);				   // 等待0.5s
-// 	}
-// 	pthread_exit(0);
-// }
-
 // 密钥速率探测
 void *thread_keyradetection(void *args)
 {
@@ -893,13 +1092,15 @@ void *thread_keyradetection(void *args)
 	FILE *fp;
 	int prefilelen = 0;
 	int nextfilelen = 0;
-	int detetctime = 1000000; // 探测时间，单位us
+	int detetctime = 2000000; // 探测时间，单位us
 	while (1)
 	{
+		pthread_rwlock_rdlock(&keywr); // 上读锁
 		fp = fopen(KEY_FILE, "rb");
 		fseek(fp, 0, SEEK_END);	 // 定位到文件末
 		nextfilelen = ftell(fp); // 文件长度
 		fclose(fp);
+		pthread_rwlock_unlock(&keywr); // 解锁
 		if (prefilelen == 0)
 		{
 			prefilelen = nextfilelen;
@@ -907,12 +1108,59 @@ void *thread_keyradetection(void *args)
 		else
 		{
 			// 此时探测密钥速率
-			key_creat_rate = (int)((nextfilelen - prefilelen)); // kBps
+			key_creat_rate = (int)((nextfilelen - prefilelen) / 2); // kBps
 			// printf("key_creat_rate: %d kbps\n", key_creat_rate*8);
 			prefilelen = nextfilelen;
 		}
-		usleep(detetctime); // 等待1s
+		usleep(detetctime); // 等待2s
 	}
+	pthread_exit(0);
+}
+
+// 密钥重放器
+void *thread_writeSAkey(void *args)
+{
+
+	printf("CHILDSAkey supply starting...\n");
+	FILE *file = fopen("rawkeyfile.kf", "rb"); // 格式化的密钥重放文件
+	if (file == NULL)
+	{
+		perror("Error opening file");
+		pthread_exit(0);
+	}
+	unsigned char block[522]; // 8字节时间戳+2字节密钥长度(512字节)+512字节密钥
+	time_t prevTimestamp = 0;
+	while (fread(block, sizeof(char), sizeof(block), file) == sizeof(block))
+	{
+		// 提取时间戳
+		time_t currentTimestamp;
+		memcpy(&currentTimestamp, block, sizeof(uint64_t));
+		if (prevTimestamp != 0)
+		{
+			// 单位纳秒
+			time_t interval = currentTimestamp - prevTimestamp;
+			// 执行操作，暂停指定间隔
+			// printf("Performing operation with interval: %.2f mseconds\n", (float)interval/ 1000000);
+			unsigned char key[512];
+			memcpy(key, block + sizeof(uint64_t) + 2, 512);
+			// 为SA写密钥
+			for (int i = 0; i < spiCount; i++)
+			{
+				FILE *fp2 = fopen(dynamicSPI[i]->keyfile, "ab");
+				{
+					pthread_rwlock_wrlock(&dynamicSPI[i]->rwlock); // 上写锁
+					fseek(fp2, 0, SEEK_END);					   // 定位到文件末
+					fwrite(key, sizeof(unsigned char), 512, fp2);
+					pthread_rwlock_unlock(&dynamicSPI[i]->rwlock); // 解锁
+				}
+				fclose(fp2);
+			}
+			// 按照指定间隔暂停程序执行,微妙
+			usleep((int)(interval / 1000));
+		}
+		prevTimestamp = currentTimestamp;
+	}
+	fclose(file);
 	pthread_exit(0);
 }
 
@@ -920,9 +1168,6 @@ void *thread_keyradetection(void *args)
 void *thread_writesharedkey(void *args)
 {
 	printf("sharedkey supply starting...\n");
-	// 首先定义文件指针：fp
-	FILE *fp = fopen(KEY_FILE, "ab+");
-	fseek(fp, 0, SEEK_END);					   // 定位到文件末
 	FILE *file = fopen("rawkeyfile.kf", "rb"); // 格式化的密钥重放文件
 	if (file == NULL)
 	{
@@ -945,12 +1190,15 @@ void *thread_writesharedkey(void *args)
 			unsigned char key[512];
 			memcpy(key, block + sizeof(uint64_t) + 2, 512);
 			pthread_rwlock_wrlock(&keywr); // 上锁
-			fseek(fp, 0, SEEK_END);		   // 定位到文件末
-			int nFileLen = ftell(fp);	   // 文件长度
+			// 首先定义文件指针：fp
+			FILE *fp = fopen(KEY_FILE, "ab+");
+			fseek(fp, 0, SEEK_END);	  // 定位到文件末
+			int nFileLen = ftell(fp); // 文件长度
 			if (nFileLen < MAX_KEYFILE_SIZE)
 			{
 				fwrite(key, sizeof(unsigned char), 512, fp);
 			}
+			fclose(fp);
 			pthread_rwlock_unlock(&keywr); // 解锁
 			// 按照指定间隔暂停程序执行,微妙
 			usleep((int)(interval / 1000));
@@ -958,7 +1206,7 @@ void *thread_writesharedkey(void *args)
 		prevTimestamp = currentTimestamp;
 	}
 	fclose(file);
-	fclose(fp);
+
 	pthread_exit(0);
 }
 
@@ -1056,10 +1304,10 @@ void getsharedkey_handle(const char *keylen, int fd)
 	// 判断是否已经同步，如果没有同步，首先进行双方同步
 	if (!SAkey_sync_flag)
 	{
-		bool ret = SAkey_sync();
+		bool ret = IKESAkey_sync();
 		if (!ret)
 		{
-			perror("SAkey_sync error!\n");
+			perror("IKESAkey_sync error!\n");
 			char buf2[] = "A";
 			send(fd, buf2, strlen(buf2), 0);
 			return;
@@ -1067,7 +1315,11 @@ void getsharedkey_handle(const char *keylen, int fd)
 	}
 	// 读取密钥
 	readsharedkey(buf, len);
-	// printf("qkey:%s size:%d sei:%d\n", buf, len, IKEkeyindex);
+	if (DEBUG_LEVEL == 1)
+	{
+		printf("qkey:%s size:%d sei:%d\n", buf, len, IKEkeyindex);
+	}
+
 	send(fd, buf, len, 0);
 }
 
@@ -1083,7 +1335,7 @@ void getsharedkey_handle(const char *keylen, int fd)
 void getsk_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
-	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi);
+	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi); // 如果是获取解密密钥传入的spi值是经过网络字节转换的，需要被转换回主机字节
 	while (dynamicSPI[i]->spi != hostspi)
 	{
 		i++;
@@ -1156,7 +1408,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 void getotpk_handle(const char *spi, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
-	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi);
+	int hostspi = atoi(key_type) == 1 ? ntohl(atoi(spi)) : atoi(spi); // 如果是获取解密密钥传入的spi值是经过网络字节转换的，需要被转换回主机字节
 	while (dynamicSPI[i]->spi != hostspi)
 	{
 		i++;
@@ -1289,12 +1541,12 @@ void spiregister_handle(const char *spi, const char *inbound, int fd)
 		// 如果是入站SPI，需要初始化解密参数
 		if (newinbound)
 		{
-			dynamicSPI[spiCount]->encrypt_flag = 1;
+			dynamicSPI[spiCount]->in_bound = 1;
 			initializeQueue(&(dynamicSPI[spiCount]->myQueue)); // 初始化解密密钥派生参数队列
 		}
 		else
 		{
-			dynamicSPI[spiCount]->encrypt_flag = 0;
+			dynamicSPI[spiCount]->in_bound = 0;
 			dynamicSPI[spiCount]->cur_ekeyd = INIT_KEYD; // 初始化加密密钥派生参数
 			dynamicSPI[spiCount]->eM = INIT_KEYM;
 		}
@@ -1322,19 +1574,32 @@ void encflag_handle(const char *spi, const char *remote_flag, int fd)
 		i++;
 	}
 	SpiParams *local_spi = dynamicSPI[i];
-	char buf[BUFFER_SIZE];
-	printf("local_encrypt_flag:%d remote_flag:%d\n", local_spi->encrypt_flag, atoi(remote_flag));
-	sprintf(buf, "encflagsync %d\n", local_spi->encrypt_flag);
-	send(fd, buf, strlen(buf), 0);
+	printf("local_encrypt_flag:%d remote_flag:%d\n", local_spi->in_bound, atoi(remote_flag));
+
+	// 发送消息时
+	const char *method = "encflagsync";
+	char data[1][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", local_spi->in_bound);
+	create_hmac_packet(method, data, 1, packet);
+	send(fd, packet, PACKET_SIZE, 0);
 }
 
 void SAkey_sync_handle(const char *remote_index, int fd)
 {
-	IKEkeyindex = max(IKEkeyindex, atoi(remote_index));
 	SAkey_sync_flag = true;
-	char buf[BUFFER_SIZE];
-	sprintf(buf, "SAkeyindexsync %d\n", IKEkeyindex);
-	send(fd, buf, strlen(buf), 0);
+	IKEkeyindex = max(IKEkeyindex, atoi(remote_index));
+	// 发送消息时
+	const char *method = "SAkeyindexsync";
+	char data[1][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", IKEkeyindex);
+	create_hmac_packet(method, data, 1, packet);
+	send(fd, packet, PACKET_SIZE, 0);
 }
 
 /**
@@ -1356,9 +1621,15 @@ void keysync_handle(const char *spi, const char *global_index, int fd)
 	int keyindex = local_spi->keyindex;
 	local_spi->keyindex = max(delkeyindex + keyindex, atoi(global_index)) - delkeyindex;
 	local_spi->key_sync_flag = true;
-	char buf[BUFFER_SIZE];
-	sprintf(buf, "keyindexsync %d\n", keyindex + delkeyindex);
-	send(fd, buf, strlen(buf), 0);
+	// 发送消息时
+	const char *method = "keyindexsync";
+	char data[1][17] = {0};
+	unsigned char packet[PACKET_SIZE];
+
+	// 将参数转换为字符串并存储在data数组中
+	snprintf(data[0], 17, "%d", keyindex + delkeyindex);
+	create_hmac_packet(method, data, 1, packet);
+	send(fd, packet, PACKET_SIZE, 0);
 }
 
 /**
@@ -1435,7 +1706,7 @@ void *reactor_local_socket()
 			{
 				if (fd == local_lfd)
 				{
-					printf("local_connection request:!\n");
+					printf("local_connection request!\n");
 					handler_conreq_unix(local_lfd, epfd); // 处理本地连接请求
 				}
 				else
@@ -1512,37 +1783,48 @@ void *print_variable()
 		int nFileLen = ftell(fp); // 文件长度
 		fclose(fp);
 		printf("ikekeypoolsize: %08d \tBytes\n", nFileLen);
-		printf("keycreatrate: %6d \tbytes\n", key_creat_rate * 8);
+		printf("keycreatrate: %6d \tkbps\n", key_creat_rate * 8);
 		printf("ikekeyuse: %08d \t Bytes\n", IKEkeyindex);
 
 		printf("ipsecsatables: %2d \t SAs\n", spiCount);
 		for (int i = 0; i < spiCount; i++)
 		{
-			printf("\nSPI: %s \t enc_flag:%d\n", dynamicSPI[i]->keyfile, dynamicSPI[i]->in_bound);
+			printf("\nSPI: %x \t enc_flag:%d\n", htonl(dynamicSPI[i]->spi), dynamicSPI[i]->in_bound);
 			FILE *fp = fopen(dynamicSPI[i]->keyfile, "rb");
-			int nSAFileLen = ftell(fp); // 文件长度
-			fclose(fp);
-			printf("keypoolsize: %08d \tBytes \t SAkeyuse: %08d \t Bytes\n", nSAFileLen, dynamicSPI[i]->keyindex);
+			if (fp == NULL)
+			{
+				printf("Failed to open file: %s\n", dynamicSPI[i]->keyfile);
+				// 这里可以根据你的需要处理错误，例如返回错误码或者退出程序
+			}
+			else
+			{
+				fseek(fp, 0, SEEK_END);
+				int nSAFileLen = ftell(fp); // 文件长度
+				printf("keypoolsize: %08d \tBytes \t SAkeyuse: %08d \t Bytes\n", nSAFileLen, dynamicSPI[i]->keyindex);
+				fclose(fp);
+			}
 			if (dynamicSPI[i]->encalg == 1)
 			{
-				printf("加密模式: 动态密钥更新\n");
+				printf("Encryption Mode: Dynamic Key Update\n");
 				if (!dynamicSPI[i]->in_bound)
 				{
-					printf(" 当前密钥派生参数:%d \t 当前加密量子密钥:%s \n", dynamicSPI[i]->cur_ekeyd, dynamicSPI[i]->raw_ekey);
+					printf(" Current key derivation parameters:%d \t  Current encryption qkey:%s\n", dynamicSPI[i]->cur_ekeyd, dynamicSPI[i]->raw_ekey);
 				}
-				else{
-					printf(" 当前解密量子密钥:%s \n", dynamicSPI[i]->raw_dkey);
+				else
+				{
+					printf(" current decryption quantum key:%s\n", dynamicSPI[i]->raw_dkey);
 				}
 			}
 			else if (dynamicSPI[i]->encalg == 2)
 			{
-				printf("加密模式: 自适应一次一密\n");
+				printf("Encryption Mode: Adaptive OTP\n");
 				if (!dynamicSPI[i]->in_bound)
 				{
-					printf(" 当前加密密钥窗口:(0,%d] \t 当前密钥阈值:%d \n", dynamicSPI[i]->ekey_rw, dynamicSPI[i]->eM);
+					printf(" Current Encryption Key Window:(0,%d] \t Current key threshold:%d \n", dynamicSPI[i]->ekey_rw, dynamicSPI[i]->eM);
 				}
-				else{
-					printf(" 当前解密密钥窗口:(%d,%d] \n", dynamicSPI[i]->dkey_lw,dynamicSPI[i]->dkey_rw);
+				else
+				{
+					printf(" Current decryption key window:(%d,%d] \n", dynamicSPI[i]->dkey_lw, dynamicSPI[i]->dkey_rw);
 				}
 			}
 		}
@@ -1589,14 +1871,19 @@ int main(int argc, char *argv[])
 
 	pthread_rwlock_init(&keywr, NULL); // 初始化读写锁
 	pthread_mutex_init(&mutex, NULL);  // 初始化互斥锁
-	pthread_t writethread[3];
-	pthread_create(&writethread[0], NULL, thread_writesharedkey, NULL); // DH密钥写入线程启动
+	pthread_t writethread[4];
+	pthread_create(&writethread[0], NULL, thread_writesharedkey, NULL); // 密钥写入线程启动
 	pthread_detach(writethread[0]);										// 线程分离
 	pthread_create(&writethread[1], NULL, thread_writeSAkey, NULL);		// SA密钥写入线程启动
-	pthread_detach(writethread[1]);										// 线程分离
+	pthread_detach(writethread[1]);
+
+	// pthread_create(&writethread[2], NULL, thread_keyschedule, NULL); // 密钥管理线程启动
+	// pthread_detach(writethread[2]);									 // 线程分离
+
+	// 探测线程等待1s再启动
 	sleep(1);
-	pthread_create(&writethread[2], NULL, thread_keyradetection, NULL); // 密钥速率探测线程启动
-	pthread_detach(writethread[2]);										// 线程分离
+	pthread_create(&writethread[3], NULL, thread_keyradetection, NULL); // 密钥速率探测线程启动
+	pthread_detach(writethread[3]);										// 线程分离
 
 	pthread_t thread_local, thread_external;
 	pthread_t thread_front_end;

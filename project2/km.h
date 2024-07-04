@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-12-24 14:57:56
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-05-30 20:29:45
+ * @LastEditTime: 2024-07-04 15:03:19
  * @FilePath: \c\keymanage\project2\km.h
  * @Description:
  *
@@ -30,6 +30,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
 
 // 解密派生参数队列长度
 #define MAX_QUEUE_SIZE 1000
@@ -111,7 +113,7 @@ int dequeue(Queue *queue)
 }
 
 // 用于OTP的密钥块结构体
-typedef struct
+typedef struct 
 {
 	char key[OTPTH + 1];
 	int size;
@@ -140,13 +142,20 @@ typedef struct SpiParams
 
 typedef struct HandleData
 {
-	char method[32];
-	char arg1[16];
-	char arg2[16];
-	char arg3[16];
-	char arg4[16];
-	int fd;
+	char method[32+1];
+	char arg1[16+1];
+	char arg2[16+1];
+	char arg3[16+1];
+	char arg4[16+1];
 } HandleData;
+
+// void hmac_sign(const char *message, char *signed_message);
+
+// bool hmac_verify(const char *signed_message, char *original_message);
+
+void create_hmac_packet(const char *method, const char data[][17], int data_count, unsigned char *packet);
+
+int verify_hmac_packet(const unsigned char *packet);
 
 int init_listen_local(int epfd);
 
@@ -168,7 +177,7 @@ void handler_recdata_tcp(int fd, int epfd);
 
 bool encflag_sync(SpiParams *local_spi);
 
-bool SAkey_sync();
+bool IKESAkey_sync();
 
 bool key_index_sync(SpiParams *local_spi);
 
@@ -176,11 +185,13 @@ bool derive_sync(SpiParams *local_spi);
 
 bool eM_sync(SpiParams *local_spi);
 
-void renewkey(SpiParams *local_spi);
+void renewSAkey(SpiParams *local_spi);
 
 void readFilesInFolder(const char *folderPath, FILE *fp);
 
 void *thread_writeSAkey(void *args);
+
+void *thread_keyschedule(void *args);
 
 void *thread_writesharedkey(void *args);
 
