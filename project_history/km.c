@@ -2,8 +2,8 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2023-03-30 15:42:44
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-04 16:24:28
- * @FilePath: \c\keymanage\project2\km.c
+ * @LastEditTime: 2024-07-09 10:43:37
+ * @FilePath: \c\keymanage\project_history\km.c
  * @Description:
  *
  * Copyright (c) 2024 by ${git_name_email}, All Rights Reserved.
@@ -43,9 +43,7 @@
 #define DEBUG_LEVEL 1
 
 SpiParams *dynamicSPI[MAX_DYNAMIC_SPI_COUNT];
-int key_creat_rate;		// 密钥产生速率全局变量
-int IKEkeyindex;		// 用于标识本地SA密钥池索引。
-bool SAkey_sync_flag;	// 密钥同步标志，用于供应sa协商
+
 int spiCount = 0;		// 当前SPI个数
 pthread_rwlock_t keywr; // 共享密钥池的读写锁
 pthread_mutex_t mutex;	// 共享密钥池的读写锁
@@ -474,7 +472,7 @@ void handler_recdata_unix(int fd, int epfd)
 		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", data1.method, data1.arg1, data1.arg2, data1.arg3, data1.arg4);
 		if (strncasecmp(data1.method, "spiregister", 11) == 0)
 		{
-			spiregister_handle(data1.arg1, data1.arg2, fd);
+			spiregister_handle(data1.arg1, data1.arg2);
 			discon(fd, epfd);
 		}
 		else if (strncasecmp(data1.method, "getsharedkey", 12) == 0)
