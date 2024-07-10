@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 15:58:42
+ * @LastEditTime: 2024-07-10 16:11:18
  * @FilePath: \c\keymanage\project2\src\sa_management.c
  * @Description:
  *
@@ -40,7 +40,8 @@ void create_sa(int newSPI, int newinbound)
 	{
 		dynamicSPI[spiCount]->spi = newSPI;
 		// 初始化其他与SPI相关的参数
-		dynamicSPI[spiCount]->encalg = 0;										   // 初始无法知道加密算法
+		dynamicSPI[spiCount]->encalg = 0; // 初始无法知道加密算法
+		dynamicSPI[spiCount]->encalg_keysize = 0; // 初始无法知道加密算法密钥长度
 		dynamicSPI[spiCount]->key_sync_flag = false;							   // 密钥索引同步标志设置为false
 		dynamicSPI[spiCount]->delkeyindex = 0, dynamicSPI[spiCount]->keyindex = 0; // 初始化密钥偏移
 		dynamicSPI[spiCount]->ekeybuff = NULL;
@@ -63,7 +64,7 @@ void create_sa(int newSPI, int newinbound)
 			dynamicSPI[spiCount]->eM = INIT_KEYM;
 		}
 		// 生成密钥线程
-		generate_SAkey(spiCount);
+		init_CHILDSA_key_generate(spiCount);
 		spiCount++; // 更新计数器
 		printf("Memory allocation successed for new SPI.\n");
 	}

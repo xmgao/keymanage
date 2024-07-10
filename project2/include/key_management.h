@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:19:24
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 12:03:08
+ * @LastEditTime: 2024-07-10 15:43:49
  * @FilePath: \c\keymanage\project2\include\key_management.h
  * @Description:
  *
@@ -26,20 +26,22 @@ extern int key_creat_rate; // 密钥产生速率全局变量
 extern pthread_rwlock_t keywr;		// 共享密钥池的读写锁
 
 void init_key_management();
-void generate_SAkey(int index);
+
 void store_key(const char *key);
 void retrieve_key(char *buffer, int length);
 
-void *thread_keyradetection(void *args);
+void init_CHILDSA_key_generate(int index);
 
-void *thread_writeSAkey(void *args);
+void *thread_keyrate_detection(void *args);
 
-void *thread_keyschedule(void *args);
+void *thread_CHILDSA_key_write(void *args);
 
-void *thread_writesharedkey(void *args);
+void *thread_key_lifecycle_manage(void *args);
 
-void readSAkey(SpiParams *local_spi, char *const buf, int len);
+void *thread_IKESA_key_write(void *args);
 
-void readsharedkey(char *const buf, int len);
+void CHILDSA_key_read(SpiParams *local_spi, char *const buf, int len);
+
+void IKESA_key_read(char *const buf, int len);
 
 #endif // KEY_MANAGEMENT_H

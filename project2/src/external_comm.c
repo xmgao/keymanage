@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 16:14:01
+ * @LastEditTime: 2024-07-10 19:00:12
  * @FilePath: \c\keymanage\project2\src\external_comm.c
  * @Description:
  *
@@ -40,7 +40,7 @@
 void init_external_comm()
 {
 	pthread_t thread_external;
-	pthread_create(&thread_external, NULL, reactor_external_socket, NULL);
+	pthread_create(&thread_external, NULL, thread_reactor_external, NULL);
 	if (pthread_detach(thread_external) != 0)
 	{
 		perror("pthread_detach");
@@ -148,7 +148,7 @@ int init_listen_external(int port, int epfd)
  * @param {int} port 目的端口
  * @return {*} true if 连接成功
  */
-bool con_tcpserv(int *fd, const char *dest, int port)
+bool init_tcp_con(int *fd, const char *dest, int port)
 {
 	int ret, cr;
 	struct sockaddr_in serv_addr;
@@ -298,29 +298,28 @@ void handler_recdata_tcp(int fd, int epfd)
 		strncpy(data1.arg2, (char *)(received_packet + METHOD_SIZE + 16 * 1), 16);
 		strncpy(data1.arg3, (char *)(received_packet + METHOD_SIZE + 16 * 2), 16);
 		strncpy(data1.arg4, (char *)(received_packet + METHOD_SIZE + 16 * 3), 16);
-
-		if (strncasecmp(data1.method, "keyindexsync", 12) == 0)
+		if (strcasecmp(data1.method, "CHILDSA_keyindex_sync") == 0)
 		{
-			keysync_handle(data1.arg1, data1.arg2, fd);
+			CHILDSA_keyindex_sync_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(data1.method, "SAkeysync", 9) == 0)
+		else if (strcasecmp(data1.method, "IKESA_keyindex_sync") == 0)
 		{
-			SAkey_sync_handle(data1.arg1, fd);
+			IKESA_keyindex_sync_handle(data1.arg1, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(data1.method, "encflagsync", 11) == 0)
+		else if (strcasecmp(data1.method, "encflagsync") == 0)
 		{
 			encflag_handle(data1.arg1, data1.arg2, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(data1.method, "desync", 6) == 0)
+		else if (strcasecmp(data1.method, "derive_para_sync") == 0)
 		{
-			desync_handle(data1.arg1, data1.arg2, fd);
+			derive_para_sync_handle(data1.arg1, data1.arg2, fd);
 		}
-		else if (strncasecmp(data1.method, "eMsync", 6) == 0)
+		else if (strcasecmp(data1.method, "key_threshold_sync") == 0)
 		{
-			eMsync_handle(data1.arg1, data1.arg2, fd);
+			key_threshold_sync_handle(data1.arg1, data1.arg2, fd);
 		}
 		else
 		{
@@ -336,14 +335,14 @@ void handler_recdata_tcp(int fd, int epfd)
  * @return {*} TRUE if加密对应解密
  */
 
-bool encflag_sync(SpiParams *local_spi)
+bool CHILDSA_inbound_sync(SpiParams *local_spi)
 {
 	int spi = local_spi->spi;
 	int local_flag = local_spi->in_bound;
 	int fd, ret, remote_flag;
-	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
+	if (!init_tcp_con(&fd, remote_ip, SERV_PORT))
 	{
-		perror("encflag_sync connect error!\n");
+		perror("CHILDSA_inbound_sync connect error!\n");
 		return false;
 	}
 	printf("spi:%d\tencrypt_flag:%d\n", spi, local_flag);
@@ -389,16 +388,16 @@ bool encflag_sync(SpiParams *local_spi)
 }
 
 // SA密钥同步,本地与远端服务器尝试建立连接同步密钥偏移
-bool IKESAkey_sync()
+bool IKESA_keyindex_sync()
 {
 	int fd, ret, remote_keyindex;
-	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
+	if (!init_tcp_con(&fd, remote_ip, SERV_PORT))
 	{
-		perror("SAkeysync connect error!\n");
+		perror("IKESA_keyindex_sync connect error!\n");
 		return false;
 	}
 
-	const char *method = "SAkeysync";
+	const char *method = "IKESA_keyindex_sync";
 	char data[1][17];
 	memset(data, 0, sizeof(data));
 	unsigned char packet[PACKET_SIZE];
@@ -454,7 +453,7 @@ bool IKESAkey_sync()
  * @param {SpiParams *} local_spi 本地spi参数的指针
  * @return {*} TRUE if密钥偏移同步成功
  */
-bool key_index_sync(SpiParams *local_spi)
+bool CHILDSA_keyindex_sync(SpiParams *local_spi)
 {
 	int spi = local_spi->spi;
 	int local_keyindex = local_spi->keyindex;
@@ -462,9 +461,9 @@ bool key_index_sync(SpiParams *local_spi)
 
 	int fd, ret;
 	int global_keyindex;
-	if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
+	if (!init_tcp_con(&fd, remote_ip, SERV_PORT))
 	{
-		perror("keyindexsync connect error!\n");
+		perror("CHILDSA_keyindex_sync connect error!\n");
 		return false;
 	}
 
@@ -511,7 +510,7 @@ bool key_index_sync(SpiParams *local_spi)
 	}
 }
 
-bool derive_sync(SpiParams *local_spi)
+bool derive_para_sync(SpiParams *local_spi)
 {
 	local_spi->pre_t = local_spi->cur_t;
 	gettimeofday(&local_spi->cur_t, NULL);
@@ -539,7 +538,7 @@ bool derive_sync(SpiParams *local_spi)
 		else
 		{
 			double duration = (local_spi->cur_t.tv_sec - local_spi->pre_t.tv_sec) + (local_spi->cur_t.tv_usec - local_spi->pre_t.tv_usec) / 1000000.0;
-			int vconsume = 48 / duration; // 计算速率
+			int vconsume = local_spi->encalg_keysize / duration; // 计算速率。获取的密钥长度除以获取间隔
 			if (vconsume >= key_creat_rate / 2)
 			{
 				tmp_keyd = (next_ekeyd * up_index) < 10000 ? next_ekeyd * up_index : 10000; // 乘性增加
@@ -554,14 +553,14 @@ bool derive_sync(SpiParams *local_spi)
 	// 还未发起过连接
 	if (fd == -1)
 	{ // 连接对方服务器
-		if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
+		if (!init_tcp_con(&fd, remote_ip, SERV_PORT))
 		{
-			perror("derive_sync connect error!\n");
+			perror("derive_para_sync connect error!\n");
 			return false;
 		}
 	}
 	// 发送消息时
-	const char *method = "desync";
+	const char *method = "derive_para_sync";
 	char data[2][17] = {0};
 	unsigned char packet[PACKET_SIZE];
 
@@ -573,7 +572,7 @@ bool derive_sync(SpiParams *local_spi)
 
 	if (ret < 0)
 	{
-		perror("derive_sync send error!\n");
+		perror("derive_para_sync send error!\n");
 		return false;
 	}
 	local_spi->cur_ekeyd = tmp_keyd;
@@ -585,7 +584,7 @@ bool derive_sync(SpiParams *local_spi)
  * @param {SpiParams *} local_spi	本地spi参数的指针
  * @return {*}	True if 同步成功
  */
-bool eM_sync(SpiParams *local_spi)
+bool key_threshold_sync(SpiParams *local_spi)
 {
 	static int fd = -1;
 	int ret, tmp_eM;
@@ -613,14 +612,14 @@ bool eM_sync(SpiParams *local_spi)
 	// 还未发起过连接
 	if (fd == -1)
 	{
-		if (!con_tcpserv(&fd, remote_ip, SERV_PORT))
+		if (!init_tcp_con(&fd, remote_ip, SERV_PORT))
 		{
-			perror("eM_sync connect error!\n");
+			perror("key_threshold_sync connect error!\n");
 			return false;
 		}
 	}
 	// 发送消息时
-	const char *method = "eMsync";
+	const char *method = "key_threshold_sync";
 	char data[2][17] = {0};
 	unsigned char packet[PACKET_SIZE];
 
@@ -631,7 +630,7 @@ bool eM_sync(SpiParams *local_spi)
 	ret = send(fd, packet, PACKET_SIZE, 0);
 	if (ret < 0)
 	{
-		perror("eM_sync send error!\n");
+		perror("key_threshold_sync send error!\n");
 		return false;
 	}
 	local_spi->eM = tmp_eM;
@@ -666,7 +665,7 @@ void encflag_handle(const char *spi, const char *remote_flag, int fd)
 	send(fd, packet, PACKET_SIZE, 0);
 }
 
-void SAkey_sync_handle(const char *remote_index, int fd)
+void IKESA_keyindex_sync_handle(const char *remote_index, int fd)
 {
 	SAkey_sync_flag = true;
 	IKEkeyindex = max(IKEkeyindex, atoi(remote_index));
@@ -688,7 +687,7 @@ void SAkey_sync_handle(const char *remote_index, int fd)
  * @param {int} fd socket文件描述符
  * @return {*}
  */
-void keysync_handle(const char *spi, const char *global_index, int fd)
+void CHILDSA_keyindex_sync_handle(const char *spi, const char *global_index, int fd)
 {
 	int i = 0;
 	while (dynamicSPI[i]->spi != atoi(spi))
@@ -701,7 +700,7 @@ void keysync_handle(const char *spi, const char *global_index, int fd)
 	local_spi->keyindex = max(delkeyindex + keyindex, atoi(global_index)) - delkeyindex;
 	local_spi->key_sync_flag = true;
 	// 发送消息时
-	const char *method = "keyindexsync";
+	const char *method = "CHILDSA_keyindex_sync";
 	char data[1][17] = {0};
 	unsigned char packet[PACKET_SIZE];
 
@@ -718,7 +717,7 @@ void keysync_handle(const char *spi, const char *global_index, int fd)
  * @param {int} fd socket文件描述符
  * @return {*}
  */
-void desync_handle(const char *spi, const char *key_d, int fd)
+void derive_para_sync_handle(const char *spi, const char *key_d, int fd)
 {
 	int i = 0;
 	while (dynamicSPI[i]->spi != atoi(spi))
@@ -737,7 +736,7 @@ void desync_handle(const char *spi, const char *key_d, int fd)
  * @param {int} fd socket文件描述符
  * @return {*}
  */
-void eMsync_handle(const char *spi, const char *tmp_eM, int fd)
+void key_threshold_sync_handle(const char *spi, const char *tmp_eM, int fd)
 {
 	int i = 0;
 	while (dynamicSPI[i]->spi != atoi(spi))
@@ -754,7 +753,7 @@ void eMsync_handle(const char *spi, const char *tmp_eM, int fd)
  * @description: tcp服务器运行，监听外部端口
  * @return {*}
  */
-void *reactor_external_socket()
+void *thread_reactor_external()
 {
 
 	printf("This is the tcp_unix thread.\n");

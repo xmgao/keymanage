@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 16:11:28
+ * @LastEditTime: 2024-07-10 18:48:31
  * @FilePath: \c\keymanage\project2\src\key_management.c
  * @Description:
  *
@@ -22,20 +22,20 @@ int key_creat_rate = 16000; // 初始化速率16kBps,密钥产生速率全局变量
 void init_key_management()
 {
 	pthread_rwlock_init(&keywr, NULL); // 初始化读写锁
-	pthread_t writethread[4];
-	pthread_create(&writethread[0], NULL, thread_writesharedkey, NULL); // 密钥写入线程启动
+	pthread_t writethread[3];
+	pthread_create(&writethread[0], NULL, thread_IKESA_key_write, NULL); // 密钥写入线程启动
 	pthread_detach(writethread[0]);										// 线程分离
 	// 探测线程等待1s再启动
 	sleep(1);
-	// pthread_create(&writethread[2], NULL, thread_keyschedule, NULL); // 密钥管理线程启动
-	// pthread_detach(writethread[2]);
-	pthread_create(&writethread[3], NULL, thread_keyradetection, NULL); // 密钥速率探测线程启动
-	pthread_detach(writethread[3]);										// 线程分离
+	// pthread_create(&writethread[1], NULL, thread_key_lifecycle_manage, NULL); // 密钥管理线程启动
+	// pthread_detach(writethread[1]);
+	pthread_create(&writethread[2], NULL, thread_keyrate_detection, NULL); // 密钥速率探测线程启动
+	pthread_detach(writethread[2]);										// 线程分离
 	// 初始化密钥管理
 	printf("Initializing key management...\n");
 }
 
-void generate_SAkey(int index)
+void init_CHILDSA_key_generate(int index)
 {
 	pthread_t thread_id;
 	int *thread_arg = (int *)malloc(sizeof(int)); 
@@ -46,7 +46,7 @@ void generate_SAkey(int index)
 	}
 	*thread_arg = index; // 将 int 赋值给 int *
 	// 创建子线程
-	if (pthread_create(&thread_id, NULL, thread_writeSAkey, thread_arg) != 0)
+	if (pthread_create(&thread_id, NULL, thread_CHILDSA_key_write, thread_arg) != 0)
 	{
 		perror("pthread_create");
 		free(thread_arg); // 确保在失败时释放内存
@@ -120,7 +120,7 @@ void renewSAkey(SpiParams *local_spi)
 	pthread_rwlock_unlock(&local_spi->rwlock); // 解锁
 }
 
-void *thread_keyschedule(void *args)
+void *thread_key_lifecycle_manage(void *args)
 {
 	// 模拟不断写入密钥到密钥池文件
 	while (1)
@@ -171,7 +171,7 @@ void *thread_keyschedule(void *args)
 }
 
 // 密钥速率探测
-void *thread_keyradetection(void *args)
+void *thread_keyrate_detection(void *args)
 {
 	printf("key_rate_detection starting...\n");
 	// 首先定义文件指针：fp
@@ -204,7 +204,7 @@ void *thread_keyradetection(void *args)
 }
 
 // 密钥重放器
-void *thread_writeSAkey(void *args)
+void *thread_CHILDSA_key_write(void *args)
 {
 	int *index_ptr = (int *)args;
 	int index = *index_ptr;
@@ -247,7 +247,7 @@ void *thread_writeSAkey(void *args)
 }
 
 // 密钥重放器
-void *thread_writesharedkey(void *args)
+void *thread_IKESA_key_write(void *args)
 {
 	printf("sharedkey supply starting...\n");
 	FILE *file = fopen("rawkeyfile.kf", "rb"); // 格式化的密钥重放文件
@@ -298,7 +298,7 @@ void *thread_writesharedkey(void *args)
  * @param {int} len		需要密钥的长度
  * @return {*}
  */
-void readsharedkey(char *const buf, int len)
+void IKESA_key_read(char *const buf, int len)
 {
 	char *pb = buf;
 	pthread_rwlock_rdlock(&keywr); // 上读锁
@@ -338,7 +338,7 @@ void readsharedkey(char *const buf, int len)
  * @param {int} len 需要密钥的长度
  * @return {*}
  */
-void readSAkey(SpiParams *local_spi, char *const buf, int len)
+void CHILDSA_key_read(SpiParams *local_spi, char *const buf, int len)
 {
 	char *pb = buf;
 	pthread_rwlock_rdlock(&(local_spi->rwlock)); // 上读锁

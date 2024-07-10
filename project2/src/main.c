@@ -2,19 +2,18 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:38
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 16:30:15
+ * @LastEditTime: 2024-07-10 18:50:20
  * @FilePath: \c\keymanage\project2\src\main.c
  * @Description:
  *
  * Copyright (c) 2024 by ${git_name_email}, All Rights Reserved.
  */
 
-// 运行 sudo ./qki remoteip >testlog 2> errlog
+// 运行 sudo ./qki remoteip 2> errlog
 
 #include "local_comm.h"
-#include "external_comm.h"
 #include "key_management.h"
-#include "sa_management.h"
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -152,8 +151,8 @@ int main(int argc, char *argv[])
 		free(dynamicSPI[i]->dkeybuff);
 		free(dynamicSPI[i]->olddkeybuff);
 		pthread_rwlock_destroy(&(dynamicSPI[i]->rwlock));
+		free(dynamicSPI[i]->myQueue);
 		free(dynamicSPI[i]);
 	}
-
 	return 0;
 }

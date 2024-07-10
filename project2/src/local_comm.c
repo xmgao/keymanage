@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 16:23:32
+ * @LastEditTime: 2024-07-10 15:26:08
  * @FilePath: \c\keymanage\project2\src\local_comm.c
  * @Description:
  *
@@ -31,11 +31,11 @@ void init_local_comm()
 {
 	pthread_t thread_local;
 	// 启动监听服务器，开始监听密钥请求
-	pthread_create(&thread_local, NULL, reactor_local_socket, NULL);
+	pthread_create(&thread_local, NULL, thread_reactor_local, NULL);
 	if (pthread_detach(thread_local) != 0)
 	{
 		perror("pthread_detach");
-		return ;
+		return;
 	}
 }
 
@@ -92,7 +92,7 @@ int init_listen_local(int epfd)
  * @param {int} *fd 保存soket文件描述符的地址
  * @return {*} true if 连接成功
  */
-bool con_unixserv(int *fd)
+bool init_unix_con(int *fd)
 {
 	int ret, cr;
 	*fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -154,23 +154,6 @@ void handler_conreq_unix(int fd, int epfd)
 }
 
 /**
- * @description: 关闭tcp或unix连接
- * @param {int} fd 需要关闭的文件描述符
- * @param {int} epfd epoll文件描述符
- * @return {*}
- */
-void discon(int fd, int epfd)
-{
-	int ret = epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
-	if (ret < 0)
-	{
-		perror("EPOLL_CTL_DEL error...\n");
-		// 可以选择记录日志或者执行其他错误处理逻辑
-	}
-	close(fd);
-}
-
-/**
  * @description: 处理 UNIX 域套接字密钥和注册请求
  * @param {int} fd
  * @param {int} epfd
@@ -212,23 +195,23 @@ void handler_recdata_unix(int fd, int epfd)
 		//  对应于spiregister arg1==spi, arg2=inbound
 		HandleData data1;
 		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", data1.method, data1.arg1, data1.arg2, data1.arg3, data1.arg4);
-		if (strncasecmp(data1.method, "spiregister", 11) == 0)
+		if (strcasecmp(data1.method, "spiregister") == 0)
 		{
-			spiregister_handle(data1.arg1, data1.arg2);
+			CHILDSA_register_handle(data1.arg1, data1.arg2);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(data1.method, "getsharedkey", 12) == 0)
+		else if (strcasecmp(data1.method, "getsharedkey") == 0)
 		{
-			getsharedkey_handle(data1.arg1, fd);
+			IKESA_key_get_handle(data1.arg1, fd);
 			discon(fd, epfd);
 		}
-		else if (strncasecmp(data1.method, "getotpk", 7) == 0)
+		else if (strcasecmp(data1.method, "getotpk") == 0)
 		{
-			getotpk_handle(data1.arg1, data1.arg2, data1.arg3, fd);
+			OTP_key_get_handle(data1.arg1, data1.arg2, data1.arg3, fd);
 		}
-		else if (strncasecmp(data1.method, "getsk", 5) == 0)
+		else if (strcasecmp(data1.method, "getsk") == 0)
 		{
-			getsk_handle(data1.arg1, data1.arg2, data1.arg3, data1.arg4, fd);
+			CHILDSA_key_get_handle(data1.arg1, data1.arg2, data1.arg3, data1.arg4, fd);
 		}
 		else
 		{
@@ -245,24 +228,24 @@ void handler_recdata_unix(int fd, int epfd)
  * @param {int} fd	socket文件描述符
  * @return {*}
  */
-void getsharedkey_handle(const char *keylen, int fd)
+void IKESA_key_get_handle(const char *keylen, int fd)
 {
 	int len = atoi(keylen);
 	char buf[len + 1];
 	// 判断是否已经同步，如果没有同步，首先进行双方同步
 	if (!SAkey_sync_flag)
 	{
-		bool ret = IKESAkey_sync();
+		bool ret = IKESA_keyindex_sync();
 		if (!ret)
 		{
-			perror("IKESAkey_sync error!\n");
+			perror("IKESA_keyindex_sync error!\n");
 			char buf2[] = "A";
 			send(fd, buf2, strlen(buf2), 0);
 			return;
 		}
 	}
 	// 读取密钥
-	readsharedkey(buf, len);
+	IKESA_key_read(buf, len);
 	if (DEBUG_LEVEL == 1)
 	{
 		printf("qkey:%s size:%d sei:%d\n", buf, len, IKEkeyindex);
@@ -280,7 +263,7 @@ void getsharedkey_handle(const char *keylen, int fd)
  * @param {int} fd	socket文件描述符
  * @return {*}
  */
-void getsk_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd)
+void CHILDSA_key_get_handle(const char *spi, const char *keylen, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
 	int hostspi = atoi(key_type) == 1 ? atoi(spi) : htonl(atoi(spi)); // 如果是获取加密密钥传入的spi值是主机字节，需要经过网络字节转换
@@ -290,41 +273,47 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 	}
 	SpiParams *local_spi = dynamicSPI[i];
 
-	if (local_spi->encalg == 0)
-	{
-		local_spi->encalg = 1; // 赋值为动态派生算法
-	}
-
 	int seq = atoi(syn);
 	int len = atoi(keylen);
+	// 判断是否为第一个包
+	if (seq == 1)
+	{
+		local_spi->encalg_keysize = len;
+		if (local_spi->encalg == 0)
+		{
+			local_spi->encalg = 1; // 赋值为动态派生算法
+		}
+	}
+	/* 减少延时先禁用这部分
 	// 判断syn是否为1，且是加密方,是则进行加解密关系同步，否则不需要同步
 	if (seq == 1 && atoi(key_type) == 0)
 	{
-		if (!encflag_sync(local_spi))
+		if (!CHILDSA_inbound_sync(local_spi))
 		{
-			perror("encflag_sync error!\n");
+			perror("CHILDSA_inbound_sync error!\n");
 			return;
 		}
 	}
 	// 判断密钥索引是否同步，否则进行密钥索引同步
 	if (!local_spi->key_sync_flag)
 	{
-		if (!key_index_sync(local_spi))
+		if (!CHILDSA_keyindex_sync(local_spi))
 		{
 			perror("keyindex_sync error!\n");
 			return;
 		}
 	}
+	*/
 	char buf[BUFFER_SIZE];
 	if (*key_type == '0')
 	{
-		bool ret = derive_sync(local_spi); // 派生参数同步
+		bool ret = derive_para_sync(local_spi); // 派生参数同步
 		if (!ret)
 		{
-			perror("derive_sync error!\n");
+			perror("derive_para_sync error!\n");
 			return;
 		}
-		readSAkey(local_spi, local_spi->raw_ekey, len); // 读取SA会话密钥
+		CHILDSA_key_read(local_spi, local_spi->raw_ekey, len); // 读取SA会话密钥
 
 		memcpy(buf, &local_spi->cur_ekeyd, sizeof(int));
 		memcpy(buf + sizeof(int), local_spi->raw_ekey, len);
@@ -337,8 +326,8 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
 			usleep(1000);
 			goto loop1;
 		}
-		readSAkey(local_spi, local_spi->raw_dkey, len); // 读取密钥
-		int dkeyd = dequeue(local_spi->myQueue);		// 正确的解密派生参数由一个队列管理
+		CHILDSA_key_read(local_spi, local_spi->raw_dkey, len); // 读取密钥
+		int dkeyd = dequeue(local_spi->myQueue);			   // 正确的解密派生参数由一个队列管理
 		memcpy(buf, &dkeyd, sizeof(int));
 		memcpy(buf + sizeof(int), local_spi->raw_dkey, len);
 	}
@@ -353,7 +342,7 @@ void getsk_handle(const char *spi, const char *keylen, const char *syn, const ch
  * @param {int} fd	socket文件描述符
  * @return {*}
  */
-void getotpk_handle(const char *spi, const char *syn, const char *key_type, int fd)
+void OTP_key_get_handle(const char *spi, const char *syn, const char *key_type, int fd)
 {
 	int i = 0;
 	int hostspi = atoi(key_type) == 1 ? atoi(spi) : htonl(atoi(spi)); // 如果是获取加密密钥传入的spi值是主机字节，需要经过网络字节转换
@@ -372,16 +361,16 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 	// 判断syn是否为1，且是加密方，是则进行加解密关系同步，否则不需要同步
 	if (seq == 1 && atoi(key_type) == 0)
 	{
-		if (!encflag_sync(local_spi))
+		if (!CHILDSA_inbound_sync(local_spi))
 		{
-			perror("encflag_sync error!\n");
+			perror("CHILDSA_inbound_sync error!\n");
 			return;
 		}
 	}
 	// 判断密钥索引是否同步，否则进行密钥索引同步
 	if (!local_spi->key_sync_flag)
 	{
-		if (!key_index_sync(local_spi))
+		if (!CHILDSA_keyindex_sync(local_spi))
 		{
 			perror("keyindex_sync error!\n");
 			return;
@@ -396,10 +385,10 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			if (local_spi->ekeybuff != NULL)
 				free(local_spi->ekeybuff);
 			local_spi->ekeybuff = (Keyblock *)malloc(WINSIZE * sizeof(Keyblock));
-			bool ret = eM_sync(local_spi); // 密钥块阈值M同步
+			bool ret = key_threshold_sync(local_spi); // 密钥块阈值M同步
 			for (int i = 0; i < WINSIZE; i++)
 			{
-				readSAkey(local_spi, local_spi->ekeybuff[i].key, local_spi->eM);
+				CHILDSA_key_read(local_spi, local_spi->ekeybuff[i].key, local_spi->eM);
 				local_spi->ekeybuff[i].size = local_spi->eM;
 			}
 			// 更新窗口
@@ -429,7 +418,7 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
 			int dM = dequeue(local_spi->myQueue);
 			for (int i = 0; i < WINSIZE; i++)
 			{
-				readSAkey(local_spi, local_spi->dkeybuff[i].key, dM);
+				CHILDSA_key_read(local_spi, local_spi->dkeybuff[i].key, dM);
 				local_spi->dkeybuff[i].size = dM;
 			}
 			// 更新窗口
@@ -459,10 +448,10 @@ void getotpk_handle(const char *spi, const char *syn, const char *key_type, int 
  * @param {char *} inbound 1 if 入境SA
  * @return {*}
  */
-void spiregister_handle(const char *spi, const char *inbound)
+void CHILDSA_register_handle(const char *spi, const char *inbound)
 {
 	// 假设通过某种方式检测到新的SPI
-	int newSPI = htonl(atoi(spi)); //先统一转换为网络字节序
+	int newSPI = htonl(atoi(spi)); // 先统一转换为网络字节序
 	int newinbound = atoi(inbound);
 	// 动态分配内存，并存储新的SPI参数
 	create_sa(newSPI, newinbound);
@@ -472,7 +461,7 @@ void spiregister_handle(const char *spi, const char *inbound)
  * @description: 子线程的代码,监听本地socket端口
  * @return {*}
  */
-void *reactor_local_socket()
+void *thread_reactor_local()
 {
 	// 子线程的代码
 	printf("This is the af_unix thread.\n");

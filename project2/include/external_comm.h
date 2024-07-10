@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:19:23
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 11:34:28
+ * @LastEditTime: 2024-07-10 15:52:17
  * @FilePath: \c\keymanage\project2\include\external_comm.h
  * @Description:
  *
@@ -39,34 +39,34 @@ int verify_hmac_packet(const unsigned char *packet);
 
 int init_listen_external(int port, int epfd);
 
-bool con_tcpserv(int *fd, const char *dest, int port);
+bool init_tcp_con(int *fd, const char *dest, int port);
 
 void handler_conreq_tcp(int fd, int epfd);
 
-static void discon(int fd, int epfd);
+void discon(int fd, int epfd);
 
 void handler_recdata_tcp(int fd, int epfd);
 
-bool encflag_sync(SpiParams *local_spi);
+bool CHILDSA_inbound_sync(SpiParams *local_spi);
 
-bool IKESAkey_sync();
+bool IKESA_keyindex_sync();
 
-bool key_index_sync(SpiParams *local_spi);
+bool CHILDSA_keyindex_sync(SpiParams *local_spi);
 
-bool derive_sync(SpiParams *local_spi);
+bool derive_para_sync(SpiParams *local_spi);
 
-bool eM_sync(SpiParams *local_spi);
+bool key_threshold_sync(SpiParams *local_spi);
 
 void encflag_handle(const char *spi, const char *remote_flag, int fd);
 
-void SAkey_sync_handle(const char *remote_index, int fd);
+void IKESA_keyindex_sync_handle(const char *remote_index, int fd);
 
-void keysync_handle(const char *spi, const char *global_index, int fd);
+void CHILDSA_keyindex_sync_handle(const char *spi, const char *global_index, int fd);
 
-void desync_handle(const char *spi, const char *key_d, int fd);
+void derive_para_sync_handle(const char *spi, const char *key_d, int fd);
 
-void eMsync_handle(const char *spi, const char *tmp_eM, int fd);
+void key_threshold_sync_handle(const char *spi, const char *tmp_eM, int fd);
 
-void *reactor_external_socket();
+void *thread_reactor_external();
 
 #endif // EXTERNAL_COMM_H

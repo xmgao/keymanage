@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:19:24
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-09 12:04:29
+ * @LastEditTime: 2024-07-10 16:10:43
  * @FilePath: \c\keymanage\project2\include\sa_management.h
  * @Description:
  *
@@ -36,13 +36,13 @@ typedef struct Keyblock
 // 结构体定义，存储与每个SPI相关的参数
 struct SpiParams
 {
-	int spi;												   // SPI值，用数字表示
+	int spi;												   // SPI值，用数字表示,net字节序
 	int encalg;												   // 当前加密算法值，用数字表示，0表示暂无，1表示动态派生，2表示一次一密
+	int encalg_keysize;										   // 当前加密算法值密钥长度
 	bool in_bound;											   // true如果是入站SPI
 	char keyfile[100];										   // spi对应的密钥池文件名
 	bool key_sync_flag;										   // 密钥索引同步标志
 	int delkeyindex, keyindex;								   // 密钥索引，用于删除过期密钥，标识当前的密钥
-	int encrypt_flag;										   // 加密密钥以及解密密钥的对应关系，0标识加密，1标识解密
 	int cur_ekeyd;											   // 记录当前的加密密钥派生参数
 	char raw_ekey[64 + 1], raw_dkey[64 + 1], old_dkey[64 + 1]; // 记录原始量子密钥
 	Queue *myQueue;											   // 解密参数队列，otp和sk复用
