@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 15:26:08
+ * @LastEditTime: 2024-07-15 20:29:52
  * @FilePath: \c\keymanage\project2\src\local_comm.c
  * @Description:
  *
@@ -188,16 +188,21 @@ void handler_recdata_unix(int fd, int epfd)
 		{
 			printf("Received data from socket: %s\n", buffer);
 		}
-
-		//  对应于getk  arg1=keylen(字节)
+		//  对应于child_sa_register arg1==spi, arg2=inbound
+		//  对应于getsharedkey  arg1=keylen(字节)
 		//  对应于getsk  arg1==spi, arg2=keylen(字节), arg3=syn,arg4=keytype(0解密；1解密)
 		//  对应于getotpk arg1==spi, arg2=syn,arg3=keytype //如果是解密spi则需要ntohl转换
-		//  对应于spiregister arg1==spi, arg2=inbound
+		//  对应于child_sa_destroy arg1==spi
 		HandleData data1;
 		sscanf(buffer, "%[^ ] %[^ ] %[^ ] %[^ ] %[^ ]", data1.method, data1.arg1, data1.arg2, data1.arg3, data1.arg4);
-		if (strcasecmp(data1.method, "spiregister") == 0)
+		if (strcasecmp(data1.method, "childsaregister") == 0)
 		{
 			CHILDSA_register_handle(data1.arg1, data1.arg2);
+			discon(fd, epfd);
+		}
+		if (strcasecmp(data1.method, "childsadestroy") == 0)
+		{
+			CHILDSA_destroy_handle(data1.arg1);
 			discon(fd, epfd);
 		}
 		else if (strcasecmp(data1.method, "getsharedkey") == 0)
@@ -215,8 +220,8 @@ void handler_recdata_unix(int fd, int epfd)
 		}
 		else
 		{
-			printf("invalid recvdata\n");
-			discon(fd, epfd);
+			printf("invalid recvdataunix:%s\n",data1.method);
+			//discon(fd, epfd);
 		}
 	}
 	return;
@@ -267,7 +272,7 @@ void CHILDSA_key_get_handle(const char *spi, const char *keylen, const char *syn
 {
 	int i = 0;
 	int hostspi = atoi(key_type) == 1 ? atoi(spi) : htonl(atoi(spi)); // 如果是获取加密密钥传入的spi值是主机字节，需要经过网络字节转换
-	while (dynamicSPI[i]->spi != hostspi)
+	while (dynamicSPI[i]->spi != hostspi && i < spiCount)
 	{
 		i++;
 	}
@@ -346,7 +351,7 @@ void OTP_key_get_handle(const char *spi, const char *syn, const char *key_type, 
 {
 	int i = 0;
 	int hostspi = atoi(key_type) == 1 ? atoi(spi) : htonl(atoi(spi)); // 如果是获取加密密钥传入的spi值是主机字节，需要经过网络字节转换
-	while (dynamicSPI[i]->spi != hostspi)
+	while (dynamicSPI[i]->spi != hostspi && i < spiCount)
 	{
 		i++;
 	}
@@ -450,11 +455,17 @@ void OTP_key_get_handle(const char *spi, const char *syn, const char *key_type, 
  */
 void CHILDSA_register_handle(const char *spi, const char *inbound)
 {
-	// 假设通过某种方式检测到新的SPI
+	// 假设检测到新的SPI
 	int newSPI = htonl(atoi(spi)); // 先统一转换为网络字节序
 	int newinbound = atoi(inbound);
 	// 动态分配内存，并存储新的SPI参数
 	create_sa(newSPI, newinbound);
+}
+
+void CHILDSA_destroy_handle(const char *spi){
+	// 假设检测到SPI销毁请求
+	int delSPI = htonl(atoi(spi)); // 先统一转换为网络字节序
+	delete_sa(delSPI);
 }
 
 /**

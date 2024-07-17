@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:38
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 18:50:20
+ * @LastEditTime: 2024-07-17 15:31:22
  * @FilePath: \c\keymanage\project2\src\main.c
  * @Description:
  *
@@ -13,7 +13,6 @@
 
 #include "local_comm.h"
 #include "key_management.h"
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,54 +35,65 @@ void *print_variable()
 		system("clear");
 		printf("\033[1H"); // 将光标定位到第1行
 		FILE *fp;
+		pthread_rwlock_rdlock(&keywr); // 上读锁
 		fp = fopen(KEY_FILE, "rb");
 		fseek(fp, 0, SEEK_END);	  // 定位到文件末
 		int nFileLen = ftell(fp); // 文件长度
 		fclose(fp);
+		pthread_rwlock_unlock(&keywr); // 解锁
 		printf("ikekeypoolsize: %08d \tBytes\n", nFileLen);
 		printf("keycreatrate: %6d \tkbps\n", key_creat_rate * 8);
 		printf("ikekeyuse: %08d \t Bytes\n", IKEkeyindex);
-
 		printf("ipsecsatables: %2d \t SAs\n", spiCount);
 		for (int i = 0; i < spiCount; i++)
 		{
-			printf("\nSPI: %x \t enc_flag:%d\n", dynamicSPI[i]->spi, dynamicSPI[i]->in_bound);
-			FILE *fp = fopen(dynamicSPI[i]->keyfile, "rb");
-			if (fp == NULL)
+			if (!dynamicSPI[i]->is_destory)
 			{
-				printf("Failed to open file: %s\n", dynamicSPI[i]->keyfile);
-				// 这里可以根据你的需要处理错误，例如返回错误码或者退出程序
+				printf("\nSPI: %x \t enc_flag:%d\n", dynamicSPI[i]->spi, dynamicSPI[i]->in_bound);
+				pthread_rwlock_rdlock(&(dynamicSPI[i]->rwlock)); // 上读锁
+				FILE *fp = fopen(dynamicSPI[i]->keyfile, "rb");
+				if (fp == NULL)
+				{
+					printf("Failed to open file: %s\n", dynamicSPI[i]->keyfile);
+					// 这里可以根据你的需要处理错误，例如返回错误码或者退出程序
+					pthread_rwlock_unlock(&dynamicSPI[i]->rwlock); // 解锁
+				}
+				else
+				{
+					fseek(fp, 0, SEEK_END);
+					int nSAFileLen = ftell(fp); // 文件长度
+					printf("keypoolsize: %08d \tBytes \t SAkeyuse: %08d \t Bytes\n", nSAFileLen, dynamicSPI[i]->keyindex);
+					fclose(fp);
+					pthread_rwlock_unlock(&dynamicSPI[i]->rwlock); // 解锁
+				}
+				if (dynamicSPI[i]->encalg == 1)
+				{
+					printf("Encryption Mode: Dynamic Key Update\n");
+					if (!dynamicSPI[i]->in_bound)
+					{
+						printf(" Current key derivation parameters:%d \t  Current encryption qkey:%s\n", dynamicSPI[i]->cur_ekeyd, dynamicSPI[i]->raw_ekey);
+					}
+					else
+					{
+						printf(" current decryption quantum key:%s\n", dynamicSPI[i]->raw_dkey);
+					}
+				}
+				else if (dynamicSPI[i]->encalg == 2)
+				{
+					printf("Encryption Mode: Adaptive OTP\n");
+					if (!dynamicSPI[i]->in_bound)
+					{
+						printf(" Current Encryption Key Window:(0,%d] \t Current key threshold:%d \n", dynamicSPI[i]->ekey_rw, dynamicSPI[i]->eM);
+					}
+					else
+					{
+						printf(" Current decryption key window:(%d,%d] \n", dynamicSPI[i]->dkey_lw, dynamicSPI[i]->dkey_rw);
+					}
+				}
 			}
 			else
 			{
-				fseek(fp, 0, SEEK_END);
-				int nSAFileLen = ftell(fp); // 文件长度
-				printf("keypoolsize: %08d \tBytes \t SAkeyuse: %08d \t Bytes\n", nSAFileLen, dynamicSPI[i]->keyindex);
-				fclose(fp);
-			}
-			if (dynamicSPI[i]->encalg == 1)
-			{
-				printf("Encryption Mode: Dynamic Key Update\n");
-				if (!dynamicSPI[i]->in_bound)
-				{
-					printf(" Current key derivation parameters:%d \t  Current encryption qkey:%s\n", dynamicSPI[i]->cur_ekeyd, dynamicSPI[i]->raw_ekey);
-				}
-				else
-				{
-					printf(" current decryption quantum key:%s\n", dynamicSPI[i]->raw_dkey);
-				}
-			}
-			else if (dynamicSPI[i]->encalg == 2)
-			{
-				printf("Encryption Mode: Adaptive OTP\n");
-				if (!dynamicSPI[i]->in_bound)
-				{
-					printf(" Current Encryption Key Window:(0,%d] \t Current key threshold:%d \n", dynamicSPI[i]->ekey_rw, dynamicSPI[i]->eM);
-				}
-				else
-				{
-					printf(" Current decryption key window:(%d,%d] \n", dynamicSPI[i]->dkey_lw, dynamicSPI[i]->dkey_rw);
-				}
+				printf("\n destoryed SPI: %x \t enc_flag:%d\n", dynamicSPI[i]->spi, dynamicSPI[i]->in_bound);
 			}
 		}
 		// 暂停一段时间，以便观察输出

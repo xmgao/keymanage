@@ -51,12 +51,13 @@ struct SpiParams
 	int ekey_rw, dkey_lw, dkey_rw; // 加密右窗口，解密左窗口，解密右窗口
 	pthread_rwlock_t rwlock;	   // 读写锁变量
 	struct timeval pre_t, cur_t;   // 更新时间变量
+	bool is_destory;  //判断当前spi是否被销毁
 };
 
 void init_sa_management();
 
 void create_sa(int newSPI, int newinbound);
 
-void delete_sa();
+void delete_sa(int delSPI);
 
 #endif // SA_MANAGEMENT_H

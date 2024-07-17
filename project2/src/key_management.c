@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 18:48:31
+ * @LastEditTime: 2024-07-17 15:49:02
  * @FilePath: \c\keymanage\project2\src\key_management.c
  * @Description:
  *
@@ -24,21 +24,22 @@ void init_key_management()
 	pthread_rwlock_init(&keywr, NULL); // 初始化读写锁
 	pthread_t writethread[3];
 	pthread_create(&writethread[0], NULL, thread_IKESA_key_write, NULL); // 密钥写入线程启动
-	pthread_detach(writethread[0]);										// 线程分离
+	pthread_detach(writethread[0]);										 // 线程分离
 	// 探测线程等待1s再启动
 	sleep(1);
 	// pthread_create(&writethread[1], NULL, thread_key_lifecycle_manage, NULL); // 密钥管理线程启动
 	// pthread_detach(writethread[1]);
 	pthread_create(&writethread[2], NULL, thread_keyrate_detection, NULL); // 密钥速率探测线程启动
-	pthread_detach(writethread[2]);										// 线程分离
+	pthread_detach(writethread[2]);										   // 线程分离
 	// 初始化密钥管理
 	printf("Initializing key management...\n");
 }
 
+// 传入参数为当前spi的位置,从0开始
 void init_CHILDSA_key_generate(int index)
 {
 	pthread_t thread_id;
-	int *thread_arg = (int *)malloc(sizeof(int)); 
+	int *thread_arg = (int *)malloc(sizeof(int));
 	if (thread_arg == NULL)
 	{
 		perror("strdup");
@@ -58,7 +59,7 @@ void init_CHILDSA_key_generate(int index)
 		perror("pthread_detach");
 		return;
 	}
-	printf("Thread created and detached");
+	printf("Thread created and detached\n");
 }
 
 void store_key(const char *key)
@@ -209,7 +210,7 @@ void *thread_CHILDSA_key_write(void *args)
 	int *index_ptr = (int *)args;
 	int index = *index_ptr;
 	sleep(1);
-	printf("CHILDSAkey supply starting \t Thread is processing the SAindex: %d", index);
+	printf("CHILDSAkey supply starting \t Thread is processing the SAindex: %d\n", index);
 	FILE *file = fopen("rawkeyfile.kf", "rb"); // 格式化的密钥重放文件
 	if (file == NULL)
 	{
@@ -240,10 +241,11 @@ void *thread_CHILDSA_key_write(void *args)
 			usleep((int)(interval / 1000));
 		}
 		prevTimestamp = currentTimestamp;
+		if (dynamicSPI[index]->is_destory)
+			break;
 	}
 	fclose(file);
 	free(index_ptr); // 确保释放分配的内存
-	return NULL;
 }
 
 // 密钥重放器

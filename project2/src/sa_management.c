@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 16:11:18
+ * @LastEditTime: 2024-07-17 16:46:47
  * @FilePath: \c\keymanage\project2\src\sa_management.c
  * @Description:
  *
@@ -40,8 +40,8 @@ void create_sa(int newSPI, int newinbound)
 	{
 		dynamicSPI[spiCount]->spi = newSPI;
 		// 初始化其他与SPI相关的参数
-		dynamicSPI[spiCount]->encalg = 0; // 初始无法知道加密算法
-		dynamicSPI[spiCount]->encalg_keysize = 0; // 初始无法知道加密算法密钥长度
+		dynamicSPI[spiCount]->encalg = 0;										   // 初始无法知道加密算法
+		dynamicSPI[spiCount]->encalg_keysize = 0;								   // 初始无法知道加密算法密钥长度
 		dynamicSPI[spiCount]->key_sync_flag = false;							   // 密钥索引同步标志设置为false
 		dynamicSPI[spiCount]->delkeyindex = 0, dynamicSPI[spiCount]->keyindex = 0; // 初始化密钥偏移
 		dynamicSPI[spiCount]->ekeybuff = NULL;
@@ -50,6 +50,7 @@ void create_sa(int newSPI, int newinbound)
 		dynamicSPI[spiCount]->ekey_rw = 0;
 		dynamicSPI[spiCount]->dkey_lw = 0;
 		dynamicSPI[spiCount]->dkey_rw = 0;
+		dynamicSPI[spiCount]->is_destory = false;
 		// 如果是入站SPI，需要初始化解密参数
 		if (newinbound)
 		{
@@ -74,8 +75,20 @@ void create_sa(int newSPI, int newinbound)
 	}
 }
 
-void delete_sa()
+void delete_sa(int delSPI)
 {
 	// 删除 SA
 	printf("Deleting SA...\n");
+	int i = 0;
+	while (dynamicSPI[i]->spi != delSPI && i < spiCount)
+	{
+		i++;
+	}
+	if (i >= spiCount)
+	{
+		return;
+	}
+	SpiParams *del_spi = dynamicSPI[i];
+	// 先设置destory标志，程序结束时再释放资源
+	del_spi->is_destory = true;
 }

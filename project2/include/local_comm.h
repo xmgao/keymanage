@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:19:08
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 15:49:45
+ * @LastEditTime: 2024-07-15 19:52:23
  * @FilePath: \c\keymanage\project2\include\local_comm.h
  * @Description:
  *
@@ -32,6 +32,8 @@ void CHILDSA_key_get_handle(const char *spi, const char *keylen, const char *syn
 void OTP_key_get_handle(const char *spi, const char *syn, const char *key_type, int fd);
 
 void CHILDSA_register_handle(const char *spi, const char *inbound);
+
+void CHILDSA_destroy_handle(const char *spi);
 
 void *thread_reactor_local();
 

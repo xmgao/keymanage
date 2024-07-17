@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-10 19:00:12
+ * @LastEditTime: 2024-07-17 16:42:34
  * @FilePath: \c\keymanage\project2\src\external_comm.c
  * @Description:
  *
@@ -267,7 +267,7 @@ void handler_recdata_tcp(int fd, int epfd)
 
 	if (bytesRead <= 0)
 	{
-		perror("read error");
+		perror("read error\n");
 		discon(fd, epfd);
 	}
 	else if (!verify_hmac_packet(received_packet))
@@ -323,7 +323,7 @@ void handler_recdata_tcp(int fd, int epfd)
 		}
 		else
 		{
-			printf("invalid recdata\n");
+			printf("invalid recvdatatcp\n");
 			discon(fd, epfd);
 		}
 	}
