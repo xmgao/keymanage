@@ -348,7 +348,10 @@ void CHILDSA_key_read(SpiParams *local_spi, char *const buf, int len)
 	if (fp == NULL)
 	{
 		perror("open keyfile error!\n");
-		exit(1);
+		pthread_rwlock_unlock(&local_spi->rwlock); // ½âËø
+		sleep(1);
+		pthread_rwlock_rdlock(&local_spi->rwlock); // ÉÏ¶ÁËø
+		fp = fopen(local_spi->keyfile, "rb");
 	}
 	int keyindex = local_spi->keyindex;
 	while (1)

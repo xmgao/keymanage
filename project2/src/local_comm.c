@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-15 20:29:52
+ * @LastEditTime: 2024-07-17 19:24:22
  * @FilePath: \c\keymanage\project2\src\local_comm.c
  * @Description:
  *
@@ -220,7 +220,7 @@ void handler_recdata_unix(int fd, int epfd)
 		}
 		else
 		{
-			printf("invalid recvdataunix:%s\n",data1.method);
+			printf("invalid recvdataunix:%s\n",buffer);
 			//discon(fd, epfd);
 		}
 	}
@@ -328,7 +328,7 @@ void CHILDSA_key_get_handle(const char *spi, const char *keylen, const char *syn
 	loop1:
 		if (is_empty(local_spi->myQueue))
 		{ // 先判断队列是否为空，如果是空，说明参数还未到达队列，进行一定时间的等待
-			usleep(1000);
+			usleep(100);
 			goto loop1;
 		}
 		CHILDSA_key_read(local_spi, local_spi->raw_dkey, len); // 读取密钥

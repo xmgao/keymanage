@@ -2,7 +2,7 @@
  * @Author: xmgao dearlanxing@mail.ustc.edu.cn
  * @Date: 2024-07-08 17:20:13
  * @LastEditors: xmgao dearlanxing@mail.ustc.edu.cn
- * @LastEditTime: 2024-07-17 16:42:34
+ * @LastEditTime: 2024-07-17 18:57:24
  * @FilePath: \c\keymanage\project2\src\external_comm.c
  * @Description:
  *
@@ -35,7 +35,7 @@
 #define HMAC_SIZE 32
 #define PACKET_SIZE (METHOD_SIZE + DATA_SIZE + HMAC_SIZE)
 
-#define DEBUG_LEVEL 1
+#define DEBUG_LEVEL 0
 
 void init_external_comm()
 {

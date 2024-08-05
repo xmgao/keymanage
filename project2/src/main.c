@@ -147,12 +147,13 @@ int main(int argc, char *argv[])
 	init_sa_management();
 
 	sleep(1);
-	pthread_t thread_front_end;
-	// 创建一个新的线程，这个线程会执行print_variable函数
-	pthread_create(&thread_front_end, NULL, print_variable, NULL);
-	// 等待新的线程结束
-	pthread_join(thread_front_end, NULL);
-
+	// pthread_t thread_front_end;
+	// // 创建一个新的线程，这个线程会执行print_variable函数
+	// pthread_create(&thread_front_end, NULL, print_variable, NULL);
+	// // 等待新的线程结束
+	// pthread_join(thread_front_end, NULL);
+	while(1);
+	
 	// 程序退出时释放资源
 	pthread_rwlock_destroy(&keywr); // 销毁读写锁
 	for (int i = 0; i < spiCount; ++i)
